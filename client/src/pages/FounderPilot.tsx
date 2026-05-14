@@ -141,19 +141,21 @@ export default function FounderPilot() {
         {/* Main chat */}
         <div className="flex-1 flex flex-col overflow-hidden w-full">
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 px-3 sm:px-5 py-3 flex-shrink-0 min-w-0"
             style={{ borderBottom: "1px solid oklch(22% 0.04 220)", background: "oklch(14% 0.04 220)" }}>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-                style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 14px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.3)" }}>
-                <img src={LOGO_URL} alt="FounderPilot" className="w-7 h-7 rounded-lg object-contain" />
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+              <div
+                className="ph-logo-frame ph-logo-frame--nav w-9 h-9 rounded-xl flex-shrink-0"
+                style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 14px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.3)" }}
+              >
+                <img src={LOGO_URL} alt="FounderPilot" className="ph-logo-frame__img rounded-lg" />
               </div>
-              <div>
-                <p className="font-bold text-sm text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>FounderPilot</p>
-                <p className="text-xs" style={{ color: "oklch(55% 0.03 220)" }}>Founder & CEO Advisor · AI-Powered</p>
+              <div className="min-w-0">
+                <p className="font-bold text-sm text-white truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>FounderPilot</p>
+                <p className="text-xs truncate" style={{ color: "oklch(55% 0.03 220)" }}>Founder & CEO Advisor · AI-Powered</p>
               </div>
             </div>
-            <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+            <div className="flex items-center gap-1 sm:gap-2 flex-wrap sm:justify-end sm:flex-shrink-0">
               {messages.length >= 8 && (
                 <div className="hidden sm:flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-lg text-xs"
                   style={{ background: "oklch(55% 0.2 160 / 0.12)", border: "1px solid oklch(55% 0.2 160 / 0.3)", color: "oklch(70% 0.2 160)" }}>
@@ -188,12 +190,18 @@ export default function FounderPilot() {
              </div>
           </div>
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+          <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 space-y-4 sm:space-y-5 min-w-0">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                <div className="w-20 h-20 rounded-3xl mb-5 flex items-center justify-center"
-                  style={{ background: "oklch(18% 0.05 220)", boxShadow: "0 0 30px oklch(75% 0.18 55 / 0.3), 0 0 60px oklch(75% 0.18 55 / 0.1)", border: "1px solid oklch(75% 0.18 55 / 0.3)" }}>
-                  <img src={LOGO_URL} alt="FounderPilot" className="w-14 h-14 rounded-2xl object-contain" />
+                <div
+                  className="ph-logo-frame ph-logo-frame--tile w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-3xl mb-5"
+                  style={{
+                    background: "oklch(18% 0.05 220)",
+                    boxShadow: "0 0 30px oklch(75% 0.18 55 / 0.3), 0 0 60px oklch(75% 0.18 55 / 0.1)",
+                    border: "1px solid oklch(75% 0.18 55 / 0.3)",
+                  }}
+                >
+                  <img src={LOGO_URL} alt="FounderPilot" className="ph-logo-frame__img rounded-2xl" />
                 </div>
                 <h3 className="text-xl font-bold mb-2 text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>FounderPilot</h3>
                 <p className="text-sm mb-6 max-w-sm" style={{ color: "oklch(65% 0.03 220)" }}>Founder နဲ့ CEO တွေအတွက် strategic advisor ။ Vision, fundraising, leadership အတွက် မေးနိုင်ပါတယ်။</p>
@@ -225,9 +233,11 @@ export default function FounderPilot() {
               messages.map((msg, i) => (
                 <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                   {msg.role === "assistant" && (
-                    <div className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center mt-1"
-                      style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 8px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.25)" }}>
-                      <img src={LOGO_URL} alt="" className="w-5 h-5 rounded object-contain" />
+                    <div
+                      className="ph-logo-frame ph-logo-frame--nav w-7 h-7 rounded-lg flex-shrink-0 mt-1"
+                      style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 8px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.25)" }}
+                    >
+                      <img src={LOGO_URL} alt="" className="ph-logo-frame__img rounded-md" />
                     </div>
                   )}
                   <div className="max-w-[85%] sm:max-w-[75%] md:max-w-[65%] px-3 sm:px-4 py-2 sm:py-3 rounded-2xl text-xs sm:text-sm leading-relaxed break-words"
@@ -243,9 +253,11 @@ export default function FounderPilot() {
             )}
             {sending && (
               <div className="flex gap-3">
-                <div className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center"
-                  style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 8px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.25)" }}>
-                  <img src={LOGO_URL} alt="" className="w-5 h-5 rounded object-contain" />
+                <div
+                  className="ph-logo-frame ph-logo-frame--nav w-7 h-7 rounded-lg flex-shrink-0"
+                  style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 8px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.25)" }}
+                >
+                  <img src={LOGO_URL} alt="" className="ph-logo-frame__img rounded-md" />
                 </div>
                 <div className="px-4 py-3 rounded-2xl" style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(25% 0.04 220)" }}>
                   <div className="flex gap-1.5">

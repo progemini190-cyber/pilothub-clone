@@ -36,17 +36,21 @@ export default function AdminLogin() {
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "oklch(12% 0.03 220)" }}>
       {/* Navbar */}
-      <nav className="flex items-center justify-between px-6 py-4"
+      <nav className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 min-w-0 flex-wrap"
         style={{ borderBottom: "1px solid oklch(20% 0.04 220)" }}>
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setLocation("/")}>
-          <img src={LOGO_URL} alt="PilotHub" className="w-10 h-10 rounded-xl object-contain"
-            style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
-          <div>
-            <p className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
-            <p className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
+        <div className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0" onClick={() => setLocation("/")}>
+          <div
+            className="ph-logo-frame ph-logo-frame--nav w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex-shrink-0"
+            style={{ border: "1px solid oklch(72% 0.18 162 / 0.25)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 12px oklch(72% 0.18 162 / 0.2)" }}
+          >
+            <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-lg" style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-white text-sm truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
+            <p className="text-xs truncate" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
           </div>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-3 sm:gap-6 flex-shrink-0 flex-wrap justify-end">
           <button onClick={() => setLocation("/pricing")} className="text-sm font-medium text-slate-400 hover:text-white transition">Pricing</button>
           <button onClick={() => setLocation("/apply")} className="text-sm font-medium text-slate-400 hover:text-white transition">Apply</button>
           <button onClick={() => setLocation("/")}
@@ -64,7 +68,7 @@ export default function AdminLogin() {
           style={{ background: "radial-gradient(circle, oklch(72% 0.18 162 / 0.06) 0%, transparent 70%)", top: "40%", left: "50%", transform: "translate(-50%, -50%)" }} />
 
         <div className="w-full max-w-md relative z-10">
-          <div className="p-8 rounded-2xl"
+          <div className="p-6 sm:p-8 rounded-2xl w-full"
             style={{ background: "oklch(17% 0.05 220)", border: "1px solid oklch(25% 0.04 220)" }}>
             {/* Header */}
             <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
@@ -75,10 +79,14 @@ export default function AdminLogin() {
             </p>
 
             {/* Logo card */}
-            <div className="flex items-center gap-3 p-3 rounded-xl mb-6"
+            <div className="flex items-center gap-3 p-3 rounded-xl mb-6 min-w-0"
               style={{ background: "oklch(22% 0.05 220)", border: "1px solid oklch(28% 0.04 220)" }}>
-              <img src={LOGO_URL} alt="PilotHub" className="w-10 h-10 rounded-xl object-contain"
-                style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
+              <div
+                className="ph-logo-frame ph-logo-frame--nav w-10 h-10 rounded-xl flex-shrink-0"
+                style={{ border: "1px solid oklch(72% 0.18 162 / 0.2)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 12px oklch(72% 0.18 162 / 0.15)" }}
+              >
+                <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-lg" style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
+              </div>
               <div>
                 <p className="font-semibold text-white text-sm">PilotHub</p>
                 <p className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>

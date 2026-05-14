@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
-import { Check, Zap, Star, Crown, Lock } from "lucide-react";
+import { Check, Zap, Star, Crown, Lock, Menu, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
@@ -27,6 +28,7 @@ const faqs = [
 
 export default function Pricing() {
   const [, setLocation] = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { isAuthenticated } = useAuth();
 
   // Fetch message usage to know if starter was already purchased
@@ -54,58 +56,110 @@ export default function Pricing() {
       </div>
 
       {/* Navbar */}
-      <nav className="relative z-10 flex items-center justify-between px-6 py-4"
+      <nav className="relative z-10 flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 min-w-0"
         style={{ borderBottom: "1px solid oklch(20% 0.04 220)" }}>
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setLocation("/")}>
-          <img src={LOGO_URL} alt="PilotHub" className="w-10 h-10 rounded-xl object-contain"
-            style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
-          <div>
-            <p className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
-            <p className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
+        <div className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 flex-1" onClick={() => setLocation("/")}>
+          <div
+            className="ph-logo-frame ph-logo-frame--nav w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex-shrink-0"
+            style={{ border: "1px solid oklch(72% 0.18 162 / 0.25)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 14px oklch(72% 0.18 162 / 0.2)" }}
+          >
+            <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-lg" style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-white text-sm truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
+            <p className="text-xs truncate" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
           </div>
         </div>
-        <div className="flex items-center gap-6">
-          <button onClick={() => setLocation("/pricing")} className="text-sm font-medium text-white">Pricing</button>
-          <button onClick={() => setLocation("/apply")} className="text-sm font-medium transition" style={{ color: "oklch(60% 0.03 220)" }}>Apply</button>
+        <div className="hidden md:flex items-center gap-4 lg:gap-6 flex-shrink-0">
+          <button type="button" onClick={() => setLocation("/pricing")} className="text-sm font-medium text-white">Pricing</button>
+          <button type="button" onClick={() => setLocation("/apply")} className="text-sm font-medium transition" style={{ color: "oklch(60% 0.03 220)" }}>Apply</button>
           {isAuthenticated ? (
-            <button onClick={() => setLocation("/app")}
+            <button type="button" onClick={() => setLocation("/app")}
               className="px-4 py-2 rounded-lg text-sm font-semibold"
               style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
               Dashboard
             </button>
           ) : (
-            <button onClick={() => window.location.href = getLoginUrl()}
+            <button type="button" onClick={() => window.location.href = getLoginUrl()}
               className="px-4 py-2 rounded-lg text-sm font-semibold"
               style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
               Login
             </button>
           )}
         </div>
+        <div className="flex md:hidden items-center gap-2 flex-shrink-0">
+          {isAuthenticated ? (
+            <button type="button" onClick={() => setLocation("/app")}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
+              style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
+              Dashboard
+            </button>
+          ) : (
+            <button type="button" onClick={() => window.location.href = getLoginUrl()}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
+              style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
+              Login
+            </button>
+          )}
+          <button
+            type="button"
+            aria-expanded={mobileMenuOpen}
+            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            onClick={() => setMobileMenuOpen((o) => !o)}
+            className="p-2 rounded-lg"
+            style={{ background: "oklch(20% 0.04 220)", color: "oklch(70% 0.03 220)" }}>
+            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </nav>
+      {mobileMenuOpen && (
+        <div className="relative z-10 md:hidden px-4 pb-3 space-y-2" style={{ borderBottom: "1px solid oklch(22% 0.04 220)" }}>
+          <button type="button"
+            onClick={() => { setLocation("/pricing"); setMobileMenuOpen(false); }}
+            className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium"
+            style={{ background: "oklch(18% 0.05 220)", color: "oklch(75% 0.03 220)", border: "1px solid oklch(25% 0.04 220)" }}>
+            Pricing
+          </button>
+          <button type="button"
+            onClick={() => { setLocation("/apply"); setMobileMenuOpen(false); }}
+            className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium"
+            style={{ background: "oklch(18% 0.05 220)", color: "oklch(75% 0.03 220)", border: "1px solid oklch(25% 0.04 220)" }}>
+            Apply
+          </button>
+          <button type="button"
+            onClick={() => { setLocation("/"); setMobileMenuOpen(false); }}
+            className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium"
+            style={{ background: "oklch(18% 0.05 220)", color: "oklch(75% 0.03 220)", border: "1px solid oklch(25% 0.04 220)" }}>
+            Home
+          </button>
+        </div>
+      )}
 
       {/* Hero */}
-      <div className="relative z-10 text-center pt-16 pb-12 px-4">
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium mb-6"
+      <div className="relative z-10 text-center pt-12 sm:pt-16 pb-10 sm:pb-12 px-4">
+        <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full text-xs font-medium mb-5 sm:mb-6 max-w-full"
           style={{ background: "oklch(72% 0.18 162 / 0.1)", border: "1px solid oklch(72% 0.18 162 / 0.25)", color: "oklch(72% 0.18 162)" }}>
-          Myanmar Kyat ဖြင့် ပေးချေနိုင်သည်
+          <span className="leading-snug">Myanmar Kyat ဖြင့် ပေးချေနိုင်သည်</span>
         </div>
-        <h1 className="text-4xl md:text-5xl font-bold text-white mb-4" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+        <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold text-white mb-3 sm:mb-4 px-1 break-words" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
           Simple, Transparent Pricing
         </h1>
-        <p className="text-lg max-w-xl mx-auto" style={{ color: "oklch(60% 0.03 220)" }}>
+        <p className="text-sm sm:text-base md:text-lg max-w-xl mx-auto break-words px-1" style={{ color: "oklch(60% 0.03 220)" }}>
           Myanmar business တွေနဲ့ founder တွေအတွက် ဒီဇိုင်းဆွဲထားသော AI advisor platform
         </p>
       </div>
 
       {/* ── BizPilot Plans ── */}
       <div className="relative z-10 max-w-6xl mx-auto px-4 pb-8">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: "oklch(65% 0.22 250 / 0.15)", border: "1px solid oklch(65% 0.22 250 / 0.4)" }}>
-            <Zap className="w-4 h-4" style={{ color: "oklch(65% 0.22 250)" }} />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-5 sm:mb-6 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "oklch(65% 0.22 250 / 0.15)", border: "1px solid oklch(65% 0.22 250 / 0.4)" }}>
+              <Zap className="w-4 h-4" style={{ color: "oklch(65% 0.22 250)" }} />
+            </div>
+            <h2 className="text-lg sm:text-xl font-bold text-white whitespace-nowrap" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>BizPilot Plans</h2>
           </div>
-          <h2 className="text-xl font-bold text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>BizPilot Plans</h2>
-          <p className="text-sm" style={{ color: "oklch(55% 0.03 220)" }}>Business operators & managers</p>
+          <p className="text-xs sm:text-sm sm:ml-1 min-w-0 break-words" style={{ color: "oklch(55% 0.03 220)" }}>Business operators & managers</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-12">
@@ -233,13 +287,15 @@ export default function Pricing() {
         </div>
 
         {/* ── FounderPilot Plans ── */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: "oklch(78% 0.14 85 / 0.15)", border: "1px solid oklch(78% 0.14 85 / 0.4)" }}>
-            <Crown className="w-4 h-4" style={{ color: "oklch(78% 0.14 85)" }} />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-5 sm:mb-6 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "oklch(78% 0.14 85 / 0.15)", border: "1px solid oklch(78% 0.14 85 / 0.4)" }}>
+              <Crown className="w-4 h-4" style={{ color: "oklch(78% 0.14 85)" }} />
+            </div>
+            <h2 className="text-lg sm:text-xl font-bold text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>FounderPilot Plans</h2>
           </div>
-          <h2 className="text-xl font-bold text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>FounderPilot Plans</h2>
-          <p className="text-sm" style={{ color: "oklch(55% 0.03 220)" }}>Founders, CEOs & executive teams</p>
+          <p className="text-xs sm:text-sm sm:ml-1 min-w-0 break-words" style={{ color: "oklch(55% 0.03 220)" }}>Founders, CEOs & executive teams</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-12">
@@ -396,11 +452,12 @@ export default function Pricing() {
       </div>
 
       {/* Footer */}
-      <footer className="relative z-10 mt-auto py-8 px-6 text-center"
+      <footer className="relative z-10 mt-auto py-6 sm:py-8 px-4 sm:px-6 text-center"
         style={{ borderTop: "1px solid oklch(20% 0.04 220)" }}>
-        <div className="flex items-center justify-center gap-3 mb-3">
-          <img src={LOGO_URL} alt="PilotHub" className="w-7 h-7 rounded-lg object-contain"
-            style={{ filter: "drop-shadow(0 0 6px oklch(72% 0.18 162 / 0.4))" }} />
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 mb-3">
+          <div className="ph-logo-frame ph-logo-frame--nav w-8 h-8 rounded-lg" style={{ border: "1px solid oklch(25% 0.04 220)", background: "oklch(18% 0.05 220)" }}>
+            <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-md" style={{ filter: "drop-shadow(0 0 6px oklch(72% 0.18 162 / 0.4))" }} />
+          </div>
           <span className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</span>
           <span className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</span>
         </div>

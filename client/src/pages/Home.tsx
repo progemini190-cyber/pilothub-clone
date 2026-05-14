@@ -21,23 +21,23 @@ export default function Home() {
       {/* ── Navbar ── */}
       <nav className="fixed top-0 left-0 right-0 z-50"
         style={{ background: "oklch(12% 0.03 220 / 0.95)", backdropFilter: "blur(12px)", borderBottom: "1px solid oklch(25% 0.04 220)" }}>
-        <div className="flex items-center justify-between px-4 md:px-6 py-3">
+        <div className="flex items-center justify-between gap-2 px-4 md:px-6 py-3 min-w-0">
           {/* Logo + Name */}
-          <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => setLocation("/")}>
-            <img
-              src={LOGO_URL}
-              alt="PilotHub"
-              className="w-9 h-9 rounded-xl object-contain flex-shrink-0"
-              style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }}
-            />
-            <div>
-              <p className="font-bold text-white leading-none text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
-              <p className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
+          <div className="flex items-center gap-2 sm:gap-2.5 cursor-pointer min-w-0 flex-1 md:flex-initial" onClick={() => setLocation("/")}>
+            <div
+              className="ph-logo-frame ph-logo-frame--nav w-9 h-9 rounded-xl flex-shrink-0"
+              style={{ border: "1px solid oklch(72% 0.18 162 / 0.25)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 14px oklch(72% 0.18 162 / 0.25)" }}
+            >
+              <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-lg" style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }} />
+            </div>
+            <div className="min-w-0">
+              <p className="font-bold text-white leading-none text-sm truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
+              <p className="text-xs truncate" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
             </div>
           </div>
 
           {/* Desktop nav links */}
-          <div className="hidden md:flex items-center gap-6">
+          <div className="hidden md:flex items-center gap-6 flex-shrink-0">
             {navLinks.map(l => (
               <button key={l.href} onClick={() => setLocation(l.href)}
                 className="text-sm font-medium transition hover:text-white"
@@ -61,28 +61,27 @@ export default function Home() {
             )}
           </div>
 
-          {/* Mobile: login/dashboard button */}
-          <div className="flex md:hidden items-center gap-2">
+          <div className="flex md:hidden items-center gap-2 flex-shrink-0">
             {isAuthenticated ? (
               <button onClick={() => setLocation("/app")}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
                 style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
                 Dashboard
               </button>
             ) : (
               <button onClick={() => window.location.href = getLoginUrl()}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
                 style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
-                <LogIn className="w-3.5 h-3.5" />
-                Login
+                <LogIn className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Login</span>
               </button>
             )}
-          </div>
-          {/* Mobile: hamburger only */}
-          <div className="flex md:hidden items-center gap-2">
             <button
+              type="button"
+              aria-expanded={mobileMenuOpen}
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-lg"
+              className="p-2 rounded-lg flex-shrink-0"
               style={{ background: "oklch(20% 0.04 220)", color: "oklch(70% 0.03 220)" }}>
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -115,48 +114,49 @@ export default function Home() {
         <div className="container relative z-10">
           <div className="max-w-2xl">
             {/* Logo hero display */}
-            <div className="mb-6 w-20 h-20 rounded-2xl flex items-center justify-center"
-              style={{ border: "1px solid oklch(72% 0.18 162 / 0.3)", background: "oklch(16% 0.04 220)" }}>
-              <img
-                src={LOGO_URL}
-                alt="PilotHub"
-                className="max-w-full max-h-full w-auto h-auto object-contain p-1"
-                style={{ filter: "drop-shadow(0 0 20px oklch(72% 0.18 162 / 0.6))" }}
-              />
+            <div
+              className="ph-logo-frame ph-logo-frame--tile mb-6 w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl"
+              style={{
+                border: "1px solid oklch(72% 0.18 162 / 0.35)",
+                background: "oklch(16% 0.04 220)",
+                boxShadow: "0 0 24px oklch(72% 0.18 162 / 0.35), inset 0 0 12px oklch(72% 0.18 162 / 0.08)",
+              }}
+            >
+              <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-xl" style={{ filter: "drop-shadow(0 0 20px oklch(72% 0.18 162 / 0.6))" }} />
             </div>
 
             {/* Badge */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-5"
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-5 max-w-full"
               style={{ background: "oklch(72% 0.18 162 / 0.12)", border: "1px solid oklch(72% 0.18 162 / 0.3)", color: "oklch(72% 0.18 162)" }}>
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "oklch(72% 0.18 162)" }} />
-              Myanmar Business AI Guide Platform
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0" style={{ background: "oklch(72% 0.18 162)" }} />
+              <span className="text-left leading-snug">Myanmar Business AI Guide Platform</span>
             </div>
 
-            <h1 className="text-3xl md:text-5xl font-bold text-white mb-4" style={{ fontFamily: "'Space Grotesk', sans-serif", lineHeight: 1.15 }}>
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4 break-words" style={{ fontFamily: "'Space Grotesk', sans-serif", lineHeight: 1.15 }}>
               PilotHub
             </h1>
 
-            <p className="mb-8 text-sm md:text-base" style={{ color: "oklch(65% 0.03 220)", lineHeight: 1.7 }}>
+            <p className="mb-8 text-sm sm:text-base max-w-prose" style={{ color: "oklch(65% 0.03 220)", lineHeight: 1.7 }}>
               BizPilot powers practical execution. FounderPilot delivers strategic decision support for CEOs and executive teams.
             </p>
 
-            <div className="flex gap-3 flex-wrap">
+            <div className="flex flex-col sm:flex-row gap-3 sm:flex-wrap">
               {isAuthenticated ? (
                 <button onClick={() => setLocation("/app")}
-                  className="px-5 py-2.5 rounded-xl font-semibold text-sm transition"
+                  className="px-5 py-2.5 rounded-xl font-semibold text-sm transition w-full sm:w-auto text-center"
                   style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)", boxShadow: "0 0 20px oklch(72% 0.18 162 / 0.4)" }}>
                   Dashboard သို့ ဝင်ရောက်ပါ →
                 </button>
               ) : (
                 <>
                   <button onClick={() => window.location.href = getLoginUrl()}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition"
+                    className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition w-full sm:w-auto"
                     style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)", boxShadow: "0 0 20px oklch(72% 0.18 162 / 0.4)" }}>
                     <LogIn className="w-4 h-4" />
                     Google ဖြင့် Login ဝင်ပါ
                   </button>
                   <button onClick={() => setLocation("/apply")}
-                    className="px-5 py-2.5 rounded-xl font-semibold text-sm transition"
+                    className="px-5 py-2.5 rounded-xl font-semibold text-sm transition w-full sm:w-auto text-center"
                     style={{ background: "transparent", color: "white", border: "1px solid oklch(40% 0.05 220)" }}>
                     Apply for Access
                   </button>
@@ -175,23 +175,29 @@ export default function Home() {
             <p style={{ color: "oklch(60% 0.03 220)" }}>Two specialized AI personas designed to help you succeed</p>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          <div className="grid md:grid-cols-2 gap-6 md:gap-8 max-w-4xl mx-auto">
             {/* BizPilot */}
-            <div className="p-8 rounded-2xl relative overflow-hidden transition hover:scale-[1.02]"
+            <div className="p-5 sm:p-8 rounded-2xl relative overflow-hidden transition sm:hover:scale-[1.02]"
               style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(65% 0.22 250 / 0.3)", boxShadow: "0 0 30px oklch(65% 0.22 250 / 0.1)" }}>
               <div className="absolute top-0 right-0 w-40 h-40 rounded-full pointer-events-none"
                 style={{ background: "radial-gradient(circle, oklch(65% 0.22 250 / 0.15) 0%, transparent 70%)", transform: "translate(30%, -30%)" }} />
-              <div className="w-20 h-20 rounded-2xl mb-6 flex items-center justify-center relative overflow-hidden p-2"
-                style={{ background: "oklch(22% 0.05 220)", boxShadow: "0 0 20px oklch(65% 0.22 250 / 0.4), 0 0 50px oklch(65% 0.22 250 / 0.15)" }}>
-                <img src={LOGO_URL} alt="BizPilot" className="max-w-full max-h-full object-contain" />
-                <div className="absolute inset-0 rounded-2xl" style={{ boxShadow: "inset 0 0 15px oklch(65% 0.22 250 / 0.3)" }} />
+              <div
+                className="ph-logo-frame ph-logo-frame--tile w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl mb-5 sm:mb-6"
+                style={{
+                  background: "oklch(22% 0.05 220)",
+                  boxShadow: "0 0 20px oklch(65% 0.22 250 / 0.4), 0 0 50px oklch(65% 0.22 250 / 0.15)",
+                  border: "1px solid oklch(65% 0.22 250 / 0.35)",
+                }}
+              >
+                <div className="ph-logo-frame__inset rounded-2xl" style={{ boxShadow: "inset 0 0 15px oklch(65% 0.22 250 / 0.3)" }} />
+                <img src={LOGO_URL} alt="BizPilot" className="ph-logo-frame__img rounded-xl" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+              <h3 className="text-xl sm:text-2xl font-bold text-white mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
                 <span style={{ background: "linear-gradient(135deg, oklch(65% 0.22 250), oklch(75% 0.18 250))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
                   BizPilot
                 </span>
               </h3>
-              <p className="mb-6" style={{ color: "oklch(65% 0.03 220)" }}>
+              <p className="mb-6 text-sm sm:text-base break-words" style={{ color: "oklch(65% 0.03 220)" }}>
                 Business strategy and operations advisor. Powers practical execution for business leaders and operators.
               </p>
               <div className="flex flex-wrap gap-2">
@@ -205,21 +211,27 @@ export default function Home() {
             </div>
 
             {/* FounderPilot */}
-            <div className="p-8 rounded-2xl relative overflow-hidden transition hover:scale-[1.02]"
+            <div className="p-5 sm:p-8 rounded-2xl relative overflow-hidden transition sm:hover:scale-[1.02]"
               style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(78% 0.12 75 / 0.3)", boxShadow: "0 0 30px oklch(78% 0.12 75 / 0.1)" }}>
               <div className="absolute top-0 right-0 w-40 h-40 rounded-full pointer-events-none"
                 style={{ background: "radial-gradient(circle, oklch(78% 0.12 75 / 0.15) 0%, transparent 70%)", transform: "translate(30%, -30%)" }} />
-              <div className="w-20 h-20 rounded-2xl mb-6 flex items-center justify-center relative overflow-hidden p-2"
-                style={{ background: "oklch(22% 0.05 220)", boxShadow: "0 0 20px oklch(78% 0.12 75 / 0.4), 0 0 50px oklch(78% 0.12 75 / 0.15)" }}>
-                <img src={LOGO_URL} alt="FounderPilot" className="max-w-full max-h-full object-contain" />
-                <div className="absolute inset-0 rounded-2xl" style={{ boxShadow: "inset 0 0 15px oklch(78% 0.12 75 / 0.3)" }} />
+              <div
+                className="ph-logo-frame ph-logo-frame--tile w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl mb-5 sm:mb-6"
+                style={{
+                  background: "oklch(22% 0.05 220)",
+                  boxShadow: "0 0 20px oklch(78% 0.12 75 / 0.4), 0 0 50px oklch(78% 0.12 75 / 0.15)",
+                  border: "1px solid oklch(78% 0.12 75 / 0.35)",
+                }}
+              >
+                <div className="ph-logo-frame__inset rounded-2xl" style={{ boxShadow: "inset 0 0 15px oklch(78% 0.12 75 / 0.3)" }} />
+                <img src={LOGO_URL} alt="FounderPilot" className="ph-logo-frame__img rounded-xl" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+              <h3 className="text-xl sm:text-2xl font-bold text-white mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
                 <span style={{ background: "linear-gradient(135deg, oklch(78% 0.12 75), oklch(88% 0.10 75))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
                   FounderPilot
                 </span>
               </h3>
-              <p className="mb-6" style={{ color: "oklch(65% 0.03 220)" }}>
+              <p className="mb-6 text-sm sm:text-base break-words" style={{ color: "oklch(65% 0.03 220)" }}>
                 Strategic advisor for founders and CEOs. Delivers decision support for executive teams and vision-setting.
               </p>
               <div className="flex flex-wrap gap-2">
@@ -242,7 +254,7 @@ export default function Home() {
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Why PilotHub?</h2>
             <p style={{ color: "oklch(60% 0.03 220)" }}>Built specifically for Myanmar business leaders</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {[
               { icon: "🧠", title: "AI-Powered Insights", desc: "Get expert business advice powered by cutting-edge AI technology tailored for your context." },
               { icon: "🇲🇲", title: "Myanmar-Focused", desc: "Advice grounded in Myanmar market realities, regulations, and business culture." },
@@ -251,11 +263,11 @@ export default function Home() {
               { icon: "📊", title: "Data-Driven", desc: "Recommendations backed by market data and proven business frameworks." },
               { icon: "🎯", title: "Actionable Plans", desc: "Not just advice — concrete action plans you can implement immediately." },
             ].map((f) => (
-              <div key={f.title} className="p-6 rounded-2xl transition hover:scale-[1.02]"
+              <div key={f.title} className="p-5 sm:p-6 rounded-2xl transition sm:hover:scale-[1.02]"
                 style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(25% 0.04 220)" }}>
                 <div className="text-3xl mb-4">{f.icon}</div>
                 <h3 className="text-lg font-bold text-white mb-2" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{f.title}</h3>
-                <p className="text-sm" style={{ color: "oklch(60% 0.03 220)" }}>{f.desc}</p>
+                <p className="text-sm break-words" style={{ color: "oklch(60% 0.03 220)" }}>{f.desc}</p>
               </div>
             ))}
           </div>
@@ -288,9 +300,14 @@ export default function Home() {
 
       {/* ── Footer ── */}
       <footer className="py-8" style={{ background: "oklch(10% 0.03 220)", borderTop: "1px solid oklch(20% 0.04 220)" }}>
-        <div className="container flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <img src={LOGO_URL} alt="PilotHub" className="w-8 h-8 rounded-lg object-contain flex-shrink-0" />
+        <div className="container flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left px-4 sm:px-6">
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            <div
+              className="ph-logo-frame ph-logo-frame--nav w-10 h-10 rounded-xl"
+              style={{ border: "1px solid oklch(72% 0.18 162 / 0.25)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 12px oklch(72% 0.18 162 / 0.2)" }}
+            >
+              <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-lg" />
+            </div>
             <div>
               <p className="font-bold text-white text-sm">PilotHub</p>
               <p className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>

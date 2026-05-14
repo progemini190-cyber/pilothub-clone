@@ -35,12 +35,12 @@ export default function LoginRequired() {
       >
         {/* Logo */}
         <div className="flex justify-center mb-6">
-          <img
-            src={LOGO_URL}
-            alt="PilotHub"
-            className="w-14 h-14 rounded-2xl object-contain"
-            style={{ filter: "drop-shadow(0 0 12px oklch(72% 0.18 162 / 0.5))" }}
-          />
+          <div
+            className="ph-logo-frame ph-logo-frame--tile w-14 h-14 rounded-2xl"
+            style={{ border: "1px solid oklch(72% 0.18 162 / 0.3)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 20px oklch(72% 0.18 162 / 0.25)" }}
+          >
+            <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-xl" style={{ filter: "drop-shadow(0 0 12px oklch(72% 0.18 162 / 0.5))" }} />
+          </div>
         </div>
 
         {/* Warning icon */}

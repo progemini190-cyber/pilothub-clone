@@ -44,7 +44,7 @@ export default function Dashboard() {
   const hasFounderPlan = currentPlan === "founderpilot";
 
   const BizPilotCard = (
-    <div key="bizpilot" className="p-6 rounded-2xl cursor-pointer transition group relative"
+    <div key="bizpilot" className="p-5 sm:p-6 rounded-2xl cursor-pointer transition group relative"
       style={{
         background: hasBizPlan ? "oklch(16% 0.06 220)" : "oklch(16% 0.05 220)",
         border: hasBizPlan ? "1px solid oklch(60% 0.2 220 / 0.5)" : "1px solid oklch(25% 0.04 220)",
@@ -96,7 +96,7 @@ export default function Dashboard() {
   );
 
   const FounderPilotCard = (
-    <div key="founderpilot" className="p-6 rounded-2xl cursor-pointer transition relative"
+    <div key="founderpilot" className="p-5 sm:p-6 rounded-2xl cursor-pointer transition relative"
       style={{
         background: hasFounderPlan ? "oklch(16% 0.06 220)" : "oklch(16% 0.05 220)",
         border: hasFounderPlan ? "1px solid oklch(75% 0.18 55 / 0.5)" : "1px solid oklch(25% 0.04 220)",
@@ -186,7 +186,7 @@ export default function Dashboard() {
             Your AI-powered business advisors are ready to help. Choose an advisor below to get started.
           </p>
           {isFree && (
-            <div className="mt-3 flex items-center gap-4 text-xs">
+            <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs">
               <span style={{ color: "oklch(65% 0.2 220)" }}>BizPilot: {freeBizLeft}/10 free messages</span>
               <span style={{ color: "oklch(75% 0.18 55)" }}>FounderPilot: {freeFounderLeft}/5 free messages</span>
             </div>

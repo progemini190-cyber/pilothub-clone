@@ -125,15 +125,18 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
         style={{ background: "oklch(15% 0.04 220)", borderRight: "1px solid oklch(22% 0.04 220)" }}>
 
         {/* Logo */}
-        <div className="p-4 flex items-center gap-2.5"
+        <div className="p-4 flex items-center gap-2.5 min-w-0"
           style={{ borderBottom: "1px solid oklch(22% 0.04 220)" }}>
-          <div className="relative cursor-pointer" onClick={() => setLocation(isAdminShell ? "/admin/users" : "/")}>
-            <img src={LOGO_URL} alt="PilotHub" className="w-9 h-9 rounded-xl object-contain"
-              style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }}
-               />
+          <div className="relative cursor-pointer flex-shrink-0" onClick={() => setLocation(isAdminShell ? "/admin/users" : "/")}>
+            <div
+              className="ph-logo-frame ph-logo-frame--nav w-9 h-9 rounded-xl"
+              style={{ border: "1px solid oklch(72% 0.18 162 / 0.2)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 12px oklch(72% 0.18 162 / 0.2)" }}
+            >
+              <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-lg" style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }} />
+            </div>
           </div>
-          <div>
-            <p className="font-bold text-white text-sm leading-none" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-white text-sm leading-none truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
             <p className="text-xs mt-0.5" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
           </div>
           {isAdminShell && (
@@ -181,12 +184,19 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
             style={{ background: "oklch(15% 0.04 220)", borderRight: "1px solid oklch(22% 0.04 220)" }}
             onClick={e => e.stopPropagation()}>
             {/* Logo */}
-            <div className="p-4 flex items-center gap-2.5"
+            <div className="p-4 flex items-center gap-2.5 min-w-0"
               style={{ borderBottom: "1px solid oklch(22% 0.04 220)" }}>
-              <img src={LOGO_URL} alt="PilotHub" className="w-9 h-9 rounded-xl object-contain"
-                style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }}
-                 />
-              <div>
+              <div
+                className="ph-logo-frame ph-logo-frame--nav w-9 h-9 rounded-xl flex-shrink-0 cursor-pointer"
+                style={{ border: "1px solid oklch(72% 0.18 162 / 0.2)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 12px oklch(72% 0.18 162 / 0.2)" }}
+                onClick={() => setLocation(isAdminShell ? "/admin/users" : "/")}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLocation(isAdminShell ? "/admin/users" : "/"); } }}
+              >
+                <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-lg" style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }} />
+              </div>
+              <div className="min-w-0 flex-1">
                 <p className="font-bold text-white text-sm leading-none" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
                 <p className="text-xs mt-0.5" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
               </div>
@@ -218,31 +228,42 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
       {/* ── Main Content ── */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Mobile + Desktop Header */}
-        <div className="flex items-center px-3 sm:px-4 py-3 flex-shrink-0 gap-2"
+        <div className="flex items-center px-3 sm:px-4 py-3 flex-shrink-0 gap-2 w-full min-w-0"
           style={{ borderBottom: "1px solid oklch(22% 0.04 220)", background: "oklch(14% 0.04 220)" }}>
           {/* Mobile menu button */}
-          <button className="md:hidden p-1.5 rounded-lg flex-shrink-0"
+          <button type="button" className="md:hidden p-1.5 rounded-lg flex-shrink-0"
             style={{ background: "oklch(20% 0.04 220)", color: "oklch(65% 0.03 220)" }}
             onClick={() => setMobileMenuOpen(true)}>
             <Menu className="w-5 h-5" />
           </button>
-          {/* Mobile logo */}
-          <div className="flex items-center gap-2 md:hidden min-w-0">
-            <img src={LOGO_URL} alt="PilotHub" className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg object-contain flex-shrink-0"
-              style={{ filter: "drop-shadow(0 0 6px oklch(72% 0.18 162 / 0.5))" }}
-               />
-            <span className="font-bold text-white text-xs sm:text-sm truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</span>
-          </div>
-          {title && (
-            <h1 className="hidden md:block text-base font-bold text-white ml-1 truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{title}</h1>
+          {/* Mobile: brand only when no page title (e.g. chat pilots) */}
+          {!title && (
+            <div className="flex items-center gap-2 md:hidden min-w-0 flex-1">
+              <div
+                className="ph-logo-frame ph-logo-frame--nav w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex-shrink-0"
+                style={{ border: "1px solid oklch(72% 0.18 162 / 0.2)", background: "oklch(18% 0.05 220)" }}
+              >
+                <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-md" style={{ filter: "drop-shadow(0 0 6px oklch(72% 0.18 162 / 0.5))" }} />
+              </div>
+              <span className="font-bold text-white text-xs sm:text-sm truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</span>
+            </div>
           )}
           {title && (
-            <h1 className="md:hidden text-xs sm:text-sm font-semibold text-white ml-auto truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{title}</h1>
+            <h1 className="md:hidden flex-1 min-w-0 text-sm sm:text-base font-semibold text-white truncate pr-1" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{title}</h1>
+          )}
+          {title && (
+            <h1 className="hidden md:block text-base font-bold text-white flex-1 min-w-0 ml-1 truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{title}</h1>
           )}
           {isAdminShell && (
-            <span className="ml-auto px-1.5 sm:px-2 py-0.5 rounded text-xs font-bold hidden md:inline flex-shrink-0"
+            <span className="hidden md:inline-flex flex-shrink-0 ml-auto px-1.5 sm:px-2 py-0.5 rounded text-xs font-bold"
               style={{ background: "oklch(60% 0.22 25 / 0.2)", color: "oklch(75% 0.18 25)", border: "1px solid oklch(60% 0.22 25 / 0.3)" }}>
               ADMIN
+            </span>
+          )}
+          {isAdminShell && (
+            <span className="md:hidden flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide"
+              style={{ background: "oklch(60% 0.22 25 / 0.2)", color: "oklch(75% 0.18 25)", border: "1px solid oklch(60% 0.22 25 / 0.3)" }}>
+              Admin
             </span>
           )}
         </div>

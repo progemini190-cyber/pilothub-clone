@@ -125,10 +125,9 @@ export default function AdminModels() {
 
                   {/* Header */}
                   <div className="flex items-start gap-4 mb-5">
-                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center relative flex-shrink-0"
+                    <div className="w-16 h-16 rounded-2xl ph-logo-frame ph-logo-frame--nav flex-shrink-0"
                       style={{ background: "oklch(22% 0.05 220)" }}>
-                      <img src={LOGO_URL} alt={model.name} className="w-12 h-12 rounded-xl object-contain"
-                         />
+                      <img src={LOGO_URL} alt={model.name} className="ph-logo-frame__img rounded-xl" />
                     </div>
                     <div className="flex-1">
                       <h3 className="text-xl font-bold mb-1" style={{ fontFamily: "'Space Grotesk', sans-serif", color: model.glowColor }}>

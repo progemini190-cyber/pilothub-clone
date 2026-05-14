@@ -2,11 +2,13 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { Menu, X } from "lucide-react";
 
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 export default function Apply() {
   const [, setLocation] = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [formData, setFormData] = useState({
     fullName: "",
@@ -51,29 +53,58 @@ export default function Apply() {
       </div>
 
       {/* Navbar - Apply only, NO login button */}
-      <nav className="relative z-10 flex items-center justify-between px-6 py-4"
+      <nav className="relative z-10 flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 min-w-0"
         style={{ borderBottom: "1px solid oklch(20% 0.04 220)" }}>
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setLocation("/")}>
-          <img src={LOGO_URL} alt="PilotHub" className="w-10 h-10 rounded-xl object-contain"
-            style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
-          <div>
-            <p className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
-            <p className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
+        <div className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 flex-1" onClick={() => setLocation("/")}>
+          <div
+            className="ph-logo-frame ph-logo-frame--nav w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex-shrink-0"
+            style={{ border: "1px solid oklch(72% 0.18 162 / 0.25)", background: "oklch(18% 0.05 220)", boxShadow: "0 0 14px oklch(72% 0.18 162 / 0.2)" }}
+          >
+            <img src={LOGO_URL} alt="PilotHub" className="ph-logo-frame__img rounded-lg" style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-white text-sm truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
+            <p className="text-xs truncate" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>
           </div>
         </div>
-        {/* Only show Apply button, no Login */}
-        <div className="flex items-center gap-4">
-          <button onClick={() => setLocation("/pricing")} className="text-sm font-medium transition" style={{ color: "oklch(60% 0.03 220)" }}>Pricing</button>
-          <button onClick={() => setLocation("/apply")}
+        <div className="hidden sm:flex items-center gap-3 flex-shrink-0">
+          <button type="button" onClick={() => setLocation("/pricing")} className="text-sm font-medium transition" style={{ color: "oklch(60% 0.03 220)" }}>Pricing</button>
+          <button type="button" onClick={() => setLocation("/apply")}
             className="px-4 py-2 rounded-lg text-sm font-semibold"
             style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
             Apply
           </button>
         </div>
+        <div className="flex sm:hidden items-center gap-2 flex-shrink-0">
+          <button type="button"
+            aria-expanded={mobileMenuOpen}
+            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            onClick={() => setMobileMenuOpen((o) => !o)}
+            className="p-2 rounded-lg"
+            style={{ background: "oklch(20% 0.04 220)", color: "oklch(70% 0.03 220)" }}>
+            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </nav>
+      {mobileMenuOpen && (
+        <div className="relative z-10 sm:hidden px-4 pb-3 space-y-2" style={{ borderBottom: "1px solid oklch(22% 0.04 220)" }}>
+          <button type="button"
+            onClick={() => { setLocation("/pricing"); setMobileMenuOpen(false); }}
+            className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium"
+            style={{ background: "oklch(18% 0.05 220)", color: "oklch(75% 0.03 220)", border: "1px solid oklch(25% 0.04 220)" }}>
+            Pricing
+          </button>
+          <button type="button"
+            onClick={() => { setLocation("/"); setMobileMenuOpen(false); }}
+            className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium"
+            style={{ background: "oklch(18% 0.05 220)", color: "oklch(75% 0.03 220)", border: "1px solid oklch(25% 0.04 220)" }}>
+            Home
+          </button>
+        </div>
+      )}
 
       {/* Content */}
-      <div className="relative z-10 flex-1 max-w-6xl mx-auto w-full px-4 py-16">
+      <div className="relative z-10 flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-10 sm:py-16">
         {submitted ? (
           <div className="max-w-lg mx-auto text-center">
             <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6"
@@ -103,10 +134,10 @@ export default function Apply() {
                 style={{ background: "oklch(72% 0.18 162 / 0.1)", border: "1px solid oklch(72% 0.18 162 / 0.25)", color: "oklch(72% 0.18 162)" }}>
                 Apply for Access
               </div>
-              <h1 className="text-3xl font-bold text-white mb-4" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+              <h1 className="text-2xl sm:text-3xl font-bold text-white mb-4 break-words leading-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
                 PilotHub ကို သုံးဖို့<br />Apply လုပ်ပါ
               </h1>
-              <p className="mb-8" style={{ color: "oklch(70% 0.03 220)" }}>
+              <p className="mb-8 text-sm sm:text-base break-words" style={{ color: "oklch(70% 0.03 220)" }}>
                 Myanmar business operator တွေနဲ့ founder တွေအတွက် AI advisor platform — BizPilot နဲ့ FounderPilot တို့ကို access ရဖို့ apply လုပ်ပါ။
               </p>
 
@@ -152,13 +183,13 @@ export default function Apply() {
             </div>
 
             {/* Right: Form */}
-            <div className="p-8 rounded-2xl"
+            <div className="p-5 sm:p-8 rounded-2xl w-full min-w-0"
               style={{ background: "oklch(16% 0.05 220)", border: "1px solid oklch(25% 0.04 220)" }}>
               <h2 className="text-lg font-bold text-white mb-6" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
                 Application Form
               </h2>
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium mb-1.5" style={{ color: "oklch(70% 0.03 220)" }}>Full Name *</label>
                     <input name="fullName" value={formData.fullName} onChange={handleChange} required

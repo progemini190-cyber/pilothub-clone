@@ -151,6 +151,52 @@
   }
 
   .flex { min-height: 0; min-width: 0; }
+
+  /**
+   * PilotHub logo inside glowing / bordered frames — flex-centered so raster logos
+   * sit in the optical center of the glow, not hugging one corner of the box.
+   */
+  .ph-logo-frame {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .ph-logo-frame__inset {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .ph-logo-frame__img {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 72%;
+    max-height: 72%;
+    object-fit: contain;
+    object-position: center;
+  }
+
+  /* Navbar / compact marks: slightly tighter inset inside small squares */
+  .ph-logo-frame--nav .ph-logo-frame__img {
+    max-width: 78%;
+    max-height: 78%;
+  }
+
+  /* Hero / feature tiles */
+  .ph-logo-frame--tile .ph-logo-frame__img {
+    max-width: 68%;
+    max-height: 68%;
+  }
 }
 
 /* ── Utilities ── */
