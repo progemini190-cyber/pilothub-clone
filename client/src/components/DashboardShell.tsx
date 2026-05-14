@@ -128,7 +128,7 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
         <div className="p-4 flex items-center gap-2.5"
           style={{ borderBottom: "1px solid oklch(22% 0.04 220)" }}>
           <div className="relative cursor-pointer" onClick={() => setLocation(isAdminShell ? "/admin/users" : "/")}>
-            <img src={LOGO_URL} alt="PilotHub" className="w-9 h-9 rounded-xl object-cover"
+            <img src={LOGO_URL} alt="PilotHub" className="w-9 h-9 rounded-xl object-contain"
               style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }}
                />
           </div>
@@ -183,7 +183,7 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
             {/* Logo */}
             <div className="p-4 flex items-center gap-2.5"
               style={{ borderBottom: "1px solid oklch(22% 0.04 220)" }}>
-              <img src={LOGO_URL} alt="PilotHub" className="w-9 h-9 rounded-xl object-cover"
+              <img src={LOGO_URL} alt="PilotHub" className="w-9 h-9 rounded-xl object-contain"
                 style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }}
                  />
               <div>
@@ -228,7 +228,7 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
           </button>
           {/* Mobile logo */}
           <div className="flex items-center gap-2 md:hidden min-w-0">
-            <img src={LOGO_URL} alt="PilotHub" className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg object-cover flex-shrink-0"
+            <img src={LOGO_URL} alt="PilotHub" className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg object-contain flex-shrink-0"
               style={{ filter: "drop-shadow(0 0 6px oklch(72% 0.18 162 / 0.5))" }}
                />
             <span className="font-bold text-white text-xs sm:text-sm truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</span>

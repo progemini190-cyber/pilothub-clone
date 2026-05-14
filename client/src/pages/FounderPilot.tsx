@@ -146,7 +146,7 @@ export default function FounderPilot() {
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center"
                 style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 14px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.3)" }}>
-                <img src={LOGO_URL} alt="FounderPilot" className="w-7 h-7 rounded-lg object-cover" />
+                <img src={LOGO_URL} alt="FounderPilot" className="w-7 h-7 rounded-lg object-contain" />
               </div>
               <div>
                 <p className="font-bold text-sm text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>FounderPilot</p>
@@ -193,7 +193,7 @@ export default function FounderPilot() {
               <div className="flex flex-col items-center justify-center h-full text-center py-8">
                 <div className="w-20 h-20 rounded-3xl mb-5 flex items-center justify-center"
                   style={{ background: "oklch(18% 0.05 220)", boxShadow: "0 0 30px oklch(75% 0.18 55 / 0.3), 0 0 60px oklch(75% 0.18 55 / 0.1)", border: "1px solid oklch(75% 0.18 55 / 0.3)" }}>
-                  <img src={LOGO_URL} alt="FounderPilot" className="w-14 h-14 rounded-2xl object-cover" />
+                  <img src={LOGO_URL} alt="FounderPilot" className="w-14 h-14 rounded-2xl object-contain" />
                 </div>
                 <h3 className="text-xl font-bold mb-2 text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>FounderPilot</h3>
                 <p className="text-sm mb-6 max-w-sm" style={{ color: "oklch(65% 0.03 220)" }}>Founder နဲ့ CEO တွေအတွက် strategic advisor ။ Vision, fundraising, leadership အတွက် မေးနိုင်ပါတယ်။</p>
@@ -227,7 +227,7 @@ export default function FounderPilot() {
                   {msg.role === "assistant" && (
                     <div className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center mt-1"
                       style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 8px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.25)" }}>
-                      <img src={LOGO_URL} alt="" className="w-5 h-5 rounded object-cover" />
+                      <img src={LOGO_URL} alt="" className="w-5 h-5 rounded object-contain" />
                     </div>
                   )}
                   <div className="max-w-[85%] sm:max-w-[75%] md:max-w-[65%] px-3 sm:px-4 py-2 sm:py-3 rounded-2xl text-xs sm:text-sm leading-relaxed break-words"
@@ -245,7 +245,7 @@ export default function FounderPilot() {
               <div className="flex gap-3">
                 <div className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center"
                   style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 8px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.25)" }}>
-                  <img src={LOGO_URL} alt="" className="w-5 h-5 rounded object-cover" />
+                  <img src={LOGO_URL} alt="" className="w-5 h-5 rounded object-contain" />
                 </div>
                 <div className="px-4 py-3 rounded-2xl" style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(25% 0.04 220)" }}>
                   <div className="flex gap-1.5">

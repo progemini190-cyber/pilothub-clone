@@ -27,7 +27,7 @@ export default function Home() {
             <img
               src={LOGO_URL}
               alt="PilotHub"
-              className="w-9 h-9 rounded-xl object-cover flex-shrink-0"
+              className="w-9 h-9 rounded-xl object-contain flex-shrink-0"
               style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.6))" }}
             />
             <div>
@@ -115,12 +115,13 @@ export default function Home() {
         <div className="container relative z-10">
           <div className="max-w-2xl">
             {/* Logo hero display */}
-            <div className="mb-6">
+            <div className="mb-6 w-20 h-20 rounded-2xl flex items-center justify-center"
+              style={{ border: "1px solid oklch(72% 0.18 162 / 0.3)", background: "oklch(16% 0.04 220)" }}>
               <img
                 src={LOGO_URL}
                 alt="PilotHub"
-                className="w-20 h-20 rounded-2xl object-cover"
-                style={{ filter: "drop-shadow(0 0 20px oklch(72% 0.18 162 / 0.6))", border: "1px solid oklch(72% 0.18 162 / 0.3)" }}
+                className="max-w-full max-h-full w-auto h-auto object-contain p-1"
+                style={{ filter: "drop-shadow(0 0 20px oklch(72% 0.18 162 / 0.6))" }}
               />
             </div>
 
@@ -180,9 +181,9 @@ export default function Home() {
               style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(65% 0.22 250 / 0.3)", boxShadow: "0 0 30px oklch(65% 0.22 250 / 0.1)" }}>
               <div className="absolute top-0 right-0 w-40 h-40 rounded-full pointer-events-none"
                 style={{ background: "radial-gradient(circle, oklch(65% 0.22 250 / 0.15) 0%, transparent 70%)", transform: "translate(30%, -30%)" }} />
-              <div className="w-20 h-20 rounded-2xl mb-6 flex items-center justify-center relative overflow-hidden"
+              <div className="w-20 h-20 rounded-2xl mb-6 flex items-center justify-center relative overflow-hidden p-2"
                 style={{ background: "oklch(22% 0.05 220)", boxShadow: "0 0 20px oklch(65% 0.22 250 / 0.4), 0 0 50px oklch(65% 0.22 250 / 0.15)" }}>
-                <img src={LOGO_URL} alt="BizPilot" className="w-full h-full object-cover" />
+                <img src={LOGO_URL} alt="BizPilot" className="max-w-full max-h-full object-contain" />
                 <div className="absolute inset-0 rounded-2xl" style={{ boxShadow: "inset 0 0 15px oklch(65% 0.22 250 / 0.3)" }} />
               </div>
               <h3 className="text-2xl font-bold text-white mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
@@ -208,9 +209,9 @@ export default function Home() {
               style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(78% 0.12 75 / 0.3)", boxShadow: "0 0 30px oklch(78% 0.12 75 / 0.1)" }}>
               <div className="absolute top-0 right-0 w-40 h-40 rounded-full pointer-events-none"
                 style={{ background: "radial-gradient(circle, oklch(78% 0.12 75 / 0.15) 0%, transparent 70%)", transform: "translate(30%, -30%)" }} />
-              <div className="w-20 h-20 rounded-2xl mb-6 flex items-center justify-center relative overflow-hidden"
+              <div className="w-20 h-20 rounded-2xl mb-6 flex items-center justify-center relative overflow-hidden p-2"
                 style={{ background: "oklch(22% 0.05 220)", boxShadow: "0 0 20px oklch(78% 0.12 75 / 0.4), 0 0 50px oklch(78% 0.12 75 / 0.15)" }}>
-                <img src={LOGO_URL} alt="FounderPilot" className="w-full h-full object-cover" />
+                <img src={LOGO_URL} alt="FounderPilot" className="max-w-full max-h-full object-contain" />
                 <div className="absolute inset-0 rounded-2xl" style={{ boxShadow: "inset 0 0 15px oklch(78% 0.12 75 / 0.3)" }} />
               </div>
               <h3 className="text-2xl font-bold text-white mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
@@ -289,7 +290,7 @@ export default function Home() {
       <footer className="py-8" style={{ background: "oklch(10% 0.03 220)", borderTop: "1px solid oklch(20% 0.04 220)" }}>
         <div className="container flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <img src={LOGO_URL} alt="PilotHub" className="w-8 h-8 rounded-lg object-cover" />
+            <img src={LOGO_URL} alt="PilotHub" className="w-8 h-8 rounded-lg object-contain flex-shrink-0" />
             <div>
               <p className="font-bold text-white text-sm">PilotHub</p>
               <p className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</p>

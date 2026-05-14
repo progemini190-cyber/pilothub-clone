@@ -57,7 +57,7 @@ export default function Pricing() {
       <nav className="relative z-10 flex items-center justify-between px-6 py-4"
         style={{ borderBottom: "1px solid oklch(20% 0.04 220)" }}>
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => setLocation("/")}>
-          <img src={LOGO_URL} alt="PilotHub" className="w-10 h-10 rounded-xl object-cover"
+          <img src={LOGO_URL} alt="PilotHub" className="w-10 h-10 rounded-xl object-contain"
             style={{ filter: "drop-shadow(0 0 8px oklch(72% 0.18 162 / 0.5))" }} />
           <div>
             <p className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</p>
@@ -399,7 +399,7 @@ export default function Pricing() {
       <footer className="relative z-10 mt-auto py-8 px-6 text-center"
         style={{ borderTop: "1px solid oklch(20% 0.04 220)" }}>
         <div className="flex items-center justify-center gap-3 mb-3">
-          <img src={LOGO_URL} alt="PilotHub" className="w-7 h-7 rounded-lg object-cover"
+          <img src={LOGO_URL} alt="PilotHub" className="w-7 h-7 rounded-lg object-contain"
             style={{ filter: "drop-shadow(0 0 6px oklch(72% 0.18 162 / 0.4))" }} />
           <span className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>PilotHub</span>
           <span className="text-xs" style={{ color: "oklch(72% 0.18 162)" }}>by ChatPilot</span>

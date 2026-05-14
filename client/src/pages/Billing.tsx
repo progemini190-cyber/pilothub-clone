@@ -198,7 +198,7 @@ export default function Billing() {
             {/* Current plan info */}
             {user && (
               <div className="rounded-2xl p-4 flex items-center gap-3" style={{ background: "oklch(15% 0.04 220)", border: "1px solid oklch(22% 0.04 220)" }}>
-                <img src={LOGO_URL} alt="" className="w-10 h-10 rounded-xl object-cover" />
+                <img src={LOGO_URL} alt="" className="w-10 h-10 rounded-xl object-contain" />
                 <div>
                   <p className="text-xs mb-0.5" style={{ color: "oklch(50% 0.03 220)" }}>Current Plan</p>
                   <p className="font-bold text-white text-sm capitalize" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
@@ -229,7 +229,7 @@ export default function Billing() {
                       <div className="flex items-start gap-3 mb-3">
                         <div className="w-10 h-10 rounded-xl flex items-center justify-center relative flex-shrink-0"
                           style={{ background: plan.glowBg, border: `1px solid ${plan.glowBorder}` }}>
-                          <img src={LOGO_URL} alt="" className="w-7 h-7 rounded-lg object-cover" />
+                          <img src={LOGO_URL} alt="" className="w-7 h-7 rounded-lg object-contain" />
                           <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full"
                             style={{ background: plan.accentColor, boxShadow: `0 0 6px ${plan.accentColor}` }} />
                         </div>
@@ -309,7 +309,7 @@ export default function Billing() {
                     {qrUrl && (
                       <div className="p-4 rounded-xl mb-4 text-center" style={{ background: "oklch(18% 0.04 220)", border: "1px solid oklch(28% 0.04 220)" }}>
                         <p className="text-xs mb-3" style={{ color: "oklch(55% 0.03 220)" }}>QR Code ဖြင့် ငွေလွှဲပါ</p>
-                        <img src={qrUrl} alt="Payment QR" className="w-40 h-40 mx-auto rounded-xl object-contain" />
+                        <img src={qrUrl} alt="Payment QR" className="w-40 h-40 mx-auto rounded-xl object-cover" />
                       </div>
                     )}
                   </>
@@ -330,7 +330,7 @@ export default function Billing() {
                 onClick={() => fileInputRef.current?.click()}>
                 {screenshotPreview ? (
                   <div className="relative">
-                    <img src={screenshotPreview} alt="Receipt" className="max-h-48 mx-auto rounded-xl object-contain" />
+                    <img src={screenshotPreview} alt="Receipt" className="max-h-48 mx-auto rounded-xl object-cover" />
                     <button
                       onClick={(e) => { e.stopPropagation(); setScreenshotFile(null); setScreenshotPreview(null); }}
                       className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center"

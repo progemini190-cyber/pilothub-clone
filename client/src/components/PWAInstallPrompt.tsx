@@ -80,7 +80,7 @@ export function PWAInstallPrompt() {
           <img
             src={PILOTHUB_LOGO_URL}
             alt="PilotHub"
-            className="w-7 h-7 rounded-lg object-cover"
+            className="w-7 h-7 rounded-lg object-contain"
           />
         </div>
         <div className="flex-1 min-w-0">

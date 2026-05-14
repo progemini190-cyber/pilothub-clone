@@ -11,9 +11,15 @@
   "lang": "en",
   "icons": [
     {
-      "src": "pilothub-logo.svg",
+      "src": "pilothub-logo.PNG",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "pilothub-logo.PNG",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ],
@@ -23,14 +29,14 @@
       "short_name": "BizPilot",
       "description": "Open BizPilot AI advisor",
       "url": "/app/bizpilot",
-      "icons": [{ "src": "pilothub-logo.svg", "sizes": "512x512", "type": "image/svg+xml" }]
+      "icons": [{ "src": "pilothub-logo.PNG", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "FounderPilot",
       "short_name": "FounderPilot",
       "description": "Open FounderPilot AI advisor",
       "url": "/app/founderpilot",
-      "icons": [{ "src": "pilothub-logo.svg", "sizes": "512x512", "type": "image/svg+xml" }]
+      "icons": [{ "src": "pilothub-logo.PNG", "sizes": "192x192", "type": "image/png" }]
     }
   ],
   "screenshots": [],

@@ -12,4 +12,4 @@ export function publicUrl(path: string): string {
   return `${prefix}/${normalized}`;
 }
 
-export const PILOTHUB_LOGO_URL = publicUrl("pilothub-logo.svg");
+export const PILOTHUB_LOGO_URL = publicUrl("pilothub-logo.PNG");

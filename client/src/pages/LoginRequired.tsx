@@ -38,7 +38,7 @@ export default function LoginRequired() {
           <img
             src={LOGO_URL}
             alt="PilotHub"
-            className="w-14 h-14 rounded-2xl object-cover"
+            className="w-14 h-14 rounded-2xl object-contain"
             style={{ filter: "drop-shadow(0 0 12px oklch(72% 0.18 162 / 0.5))" }}
           />
         </div>

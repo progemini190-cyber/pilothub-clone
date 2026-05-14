@@ -82,8 +82,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || 'PilotHub', {
       body: data.body || '',
-      icon: '/pilothub-logo.svg',
-      badge: '/pilothub-logo.svg',
+      icon: '/pilothub-logo.PNG',
+      badge: '/pilothub-logo.PNG',
       tag: 'pilothub-notification',
     })
   );
