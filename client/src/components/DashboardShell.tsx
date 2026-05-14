@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useLayoutEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -25,13 +25,15 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
 
   const isAdmin = isAdminShell || user?.role === "admin";
 
-  // Approval gate: block unapproved users from accessing dashboard
-  useEffect(() => {
-    if (loading || isAdminShell) return;
-    if (user && (user as any).status === "pending") {
-      window.location.replace(`/login-required?email=${encodeURIComponent((user as any).email ?? "")}`);
+  // Approval gate: send unapproved users to login-required as early as possible (before paint when cached).
+  useLayoutEffect(() => {
+    if (isAdminShell) return;
+    if (user && (user as { status?: string }).status === "pending") {
+      window.location.replace(
+        `/login-required?email=${encodeURIComponent(String((user as { email?: string | null }).email ?? ""))}`,
+      );
     }
-  }, [user, loading, isAdminShell]);
+  }, [user, isAdminShell]);
 
   // Render-time guard: show nothing while checking or if pending
   if (!isAdminShell && (loading || (user && (user as any).status === "pending"))) {

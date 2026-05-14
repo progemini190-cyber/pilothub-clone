@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
@@ -26,10 +26,20 @@ import { useAuth } from "./_core/hooks/useAuth";
 import { Loader2 } from "lucide-react";
 import { PWAInstallPrompt } from "./components/PWAInstallPrompt";
 
+function isPublicMarketingPath(pathname: string) {
+  if (pathname === "/") return true;
+  if (pathname === "/admin/login") return true;
+  return /^\/(pricing|apply|login-required|404)(\/|$)/.test(pathname);
+}
+
 function Router() {
+  const [location] = useLocation();
   const { loading } = useAuth();
 
-  if (loading) {
+  // Never block the marketing shell on session bootstrap — avoids infinite spinner if /api/trpc hangs.
+  const blockRouterOnSession = loading && !isPublicMarketingPath(location);
+
+  if (blockRouterOnSession) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "oklch(12% 0.03 220)" }}>
         <Loader2 className="w-8 h-8 animate-spin" style={{ color: "oklch(72% 0.18 162)" }} />

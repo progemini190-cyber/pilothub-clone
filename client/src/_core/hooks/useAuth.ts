@@ -1,7 +1,10 @@
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+/** If session fetch never settles (network/proxy hang), unblock the UI after this. */
+const SESSION_BOOTSTRAP_MAX_MS = 12_000;
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -20,7 +23,22 @@ export function useAuth(options?: UseAuthOptions) {
   const meQuery = trpc.auth.me.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
+
+  const [sessionBootstrapTimedOut, setSessionBootstrapTimedOut] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(
+      () => setSessionBootstrapTimedOut(true),
+      SESSION_BOOTSTRAP_MAX_MS,
+    );
+    return () => window.clearTimeout(id);
+  }, []);
+
+  const sessionResolved =
+    meQuery.isFetched ||
+    meQuery.isError ||
+    sessionBootstrapTimedOut;
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
@@ -52,22 +70,23 @@ export function useAuth(options?: UseAuthOptions) {
     );
     return {
       user: meQuery.data ?? null,
-      loading: meQuery.isLoading || logoutMutation.isPending,
+      loading: logoutMutation.isPending || !sessionResolved,
       error: meQuery.error ?? logoutMutation.error ?? null,
       isAuthenticated: Boolean(meQuery.data),
     };
   }, [
     meQuery.data,
     meQuery.error,
-    meQuery.isLoading,
     logoutMutation.error,
     logoutMutation.isPending,
+    sessionResolved,
   ]);
 
   useEffect(() => {
     if (!redirectOnUnauthenticated) return;
     if (!redirectPath) return;
-    if (meQuery.isLoading || logoutMutation.isPending) return;
+    if ((!meQuery.isFetched && !sessionBootstrapTimedOut) || logoutMutation.isPending)
+      return;
     if (state.user) return;
     if (typeof window === "undefined") return;
     if (window.location.pathname === redirectPath) return;
@@ -77,7 +96,8 @@ export function useAuth(options?: UseAuthOptions) {
     redirectOnUnauthenticated,
     redirectPath,
     logoutMutation.isPending,
-    meQuery.isLoading,
+    meQuery.isFetched,
+    sessionBootstrapTimedOut,
     state.user,
   ]);
 
