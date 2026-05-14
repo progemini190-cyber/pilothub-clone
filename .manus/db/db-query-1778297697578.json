@@ -1,0 +1,26 @@
+{
+  "query": "SELECT u.id, u.email, u.planTypeBiz, u.bizMessageLimit, u.planTypeFounder, u.founderMessageLimit FROM users u WHERE u.id IN (SELECT DISTINCT userId FROM payments WHERE status = 'confirmed');",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute SELECT u.id, u.email, u.planTypeBiz, u.bizMessageLimit, u.planTypeFounder, u.founderMessageLimit FROM users u WHERE u.id IN (SELECT DISTINCT userId FROM payments WHERE status = 'confirmed');",
+  "rows": [
+    {
+      "id": "1",
+      "email": "progemini190@gmail.com",
+      "planTypeBiz": "pro",
+      "bizMessageLimit": "999999",
+      "planTypeFounder": "free",
+      "founderMessageLimit": "5"
+    },
+    {
+      "id": "360001",
+      "email": "test@pilothub.mm",
+      "planTypeBiz": "pro",
+      "bizMessageLimit": "999999",
+      "planTypeFounder": "free",
+      "founderMessageLimit": "5"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\temail\tplanTypeBiz\tbizMessageLimit\tplanTypeFounder\tfounderMessageLimit\n1\tprogemini190@gmail.com\tpro\t999999\tfree\t5\n360001\ttest@pilothub.mm\tpro\t999999\tfree\t5\n",
+  "stderr": "",
+  "execution_time_ms": 1898
+}

@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE `applications` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`fullName` text NOT NULL,\n\t`email` varchar(320) NOT NULL,\n\t`phone` varchar(20),\n\t`businessName` text,\n\t`businessType` varchar(128),\n\t`useCase` text,\n\t`plan` varchar(64) DEFAULT 'bizpilot',\n\t`status` enum('pending','approved','rejected') NOT NULL DEFAULT 'pending',\n\t`source` varchar(32) DEFAULT 'website',\n\t`userId` int,\n\t`notes` text,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `applications_id` PRIMARY KEY(`id`)\n)",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute CREATE TABLE `applications` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`fullName` text NOT NULL,\n\t`email` varchar(320) NOT NULL,\n\t`phone` varchar(20),\n\t`businessName` text,\n\t`businessType` varchar(128),\n\t`useCase` text,\n\t`plan` varchar(64) DEFAULT 'bizpilot',\n\t`status` enum('pending','approved','rejected') NOT NULL DEFAULT 'pending',\n\t`source` varchar(32) DEFAULT 'website',\n\t`userId` int,\n\t`notes` text,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `applications_id` PRIMARY KEY(`id`)\n)",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1840
+}

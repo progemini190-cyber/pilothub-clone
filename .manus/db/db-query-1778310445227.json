@@ -1,0 +1,9 @@
+{
+  "query": "\nUPDATE users u\nJOIN applications a ON a.email = u.email\nSET u.status = 'active'\nWHERE a.status = 'approved' AND (u.status IS NULL OR u.status != 'active');\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute \nUPDATE users u\nJOIN applications a ON a.email = u.email\nSET u.status = 'active'\nWHERE a.status = 'approved' AND (u.status IS NULL OR u.status != 'active');\n",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1931
+}

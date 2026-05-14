@@ -1,0 +1,8 @@
+{
+  "query": "SELECT id, full_name, email, plan, status FROM applications ORDER BY id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute SELECT id, full_name, email, plan, status FROM applications ORDER BY id;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'full_name' in 'field list'"
+  ]
+}

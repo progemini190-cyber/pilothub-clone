@@ -1,0 +1,98 @@
+{
+  "query": "SHOW COLUMNS FROM users LIKE '%plan%'; SHOW COLUMNS FROM users LIKE '%message%'; SHOW COLUMNS FROM users LIKE '%starter%';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute SHOW COLUMNS FROM users LIKE '%plan%'; SHOW COLUMNS FROM users LIKE '%message%'; SHOW COLUMNS FROM users LIKE '%starter%';",
+  "rows": [
+    {
+      "Field": "plan",
+      "Type": "varchar(64)",
+      "Null": "YES",
+      "Key": "",
+      "Default": "free",
+      "Extra": ""
+    },
+    {
+      "Field": "planTypeBiz",
+      "Type": "enum('free','starter','pro')",
+      "Null": "NO",
+      "Key": "",
+      "Default": "free",
+      "Extra": ""
+    },
+    {
+      "Field": "planTypeFounder",
+      "Type": "enum('free','starter','pro')",
+      "Null": "NO",
+      "Key": "",
+      "Default": "free",
+      "Extra": ""
+    },
+    {
+      "Field": "Field",
+      "Type": "Type",
+      "Null": "Null",
+      "Key": "Key",
+      "Default": "Default",
+      "Extra": "Extra"
+    },
+    {
+      "Field": "bizMessageLimit",
+      "Type": "int",
+      "Null": "NO",
+      "Key": "",
+      "Default": "5",
+      "Extra": ""
+    },
+    {
+      "Field": "founderMessageLimit",
+      "Type": "int",
+      "Null": "NO",
+      "Key": "",
+      "Default": "5",
+      "Extra": ""
+    },
+    {
+      "Field": "bizMessagesUsed",
+      "Type": "int",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "founderMessagesUsed",
+      "Type": "int",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "Field",
+      "Type": "Type",
+      "Null": "Null",
+      "Key": "Key",
+      "Default": "Default",
+      "Extra": "Extra"
+    },
+    {
+      "Field": "hasUsedBizStarter",
+      "Type": "enum('true','false')",
+      "Null": "NO",
+      "Key": "",
+      "Default": "false",
+      "Extra": ""
+    },
+    {
+      "Field": "hasUsedFounderStarter",
+      "Type": "enum('true','false')",
+      "Null": "NO",
+      "Key": "",
+      "Default": "false",
+      "Extra": ""
+    }
+  ],
+  "messages": [],
+  "stdout": "Field\tType\tNull\tKey\tDefault\tExtra\nplan\tvarchar(64)\tYES\t\tfree\t\nplanTypeBiz\tenum('free','starter','pro')\tNO\t\tfree\t\nplanTypeFounder\tenum('free','starter','pro')\tNO\t\tfree\t\nField\tType\tNull\tKey\tDefault\tExtra\nbizMessageLimit\tint\tNO\t\t5\t\nfounderMessageLimit\tint\tNO\t\t5\t\nbizMessagesUsed\tint\tNO\t\t0\t\nfounderMessagesUsed\tint\tNO\t\t0\t\nField\tType\tNull\tKey\tDefault\tExtra\nhasUsedBizStarter\tenum('true','false')\tNO\t\tfalse\t\nhasUsedFounderStarter\tenum('true','false')\tNO\t\tfalse\t\n",
+  "stderr": "",
+  "execution_time_ms": 2375
+}

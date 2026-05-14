@@ -1,0 +1,44 @@
+{
+  "name": "PilotHub by ChatPilot",
+  "short_name": "PilotHub",
+  "description": "AI-powered business advisory platform for Myanmar founders and business operators",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a1628",
+  "theme_color": "#22c58b",
+  "categories": ["business", "productivity", "utilities"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/manus-storage/pilothub-logo_5dd5446d.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/manus-storage/pilothub-logo_5dd5446d.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "BizPilot",
+      "short_name": "BizPilot",
+      "description": "Open BizPilot AI advisor",
+      "url": "/dashboard/bizpilot",
+      "icons": [{ "src": "/manus-storage/pilothub-logo_5dd5446d.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "FounderPilot",
+      "short_name": "FounderPilot",
+      "description": "Open FounderPilot AI advisor",
+      "url": "/dashboard/founderpilot",
+      "icons": [{ "src": "/manus-storage/pilothub-logo_5dd5446d.png", "sizes": "96x96" }]
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}

@@ -1,0 +1,22 @@
+{
+  "query": "SELECT id, email, status, plan FROM users ORDER BY id LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute SELECT id, email, status, plan FROM users ORDER BY id LIMIT 10;",
+  "rows": [
+    {
+      "id": "1",
+      "email": "progemini190@gmail.com",
+      "status": "active",
+      "plan": "bizpilot"
+    },
+    {
+      "id": "2910033",
+      "email": "progemini190@gmail.com",
+      "status": "active",
+      "plan": "free"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\temail\tstatus\tplan\n1\tprogemini190@gmail.com\tactive\tbizpilot\n2910033\tprogemini190@gmail.com\tactive\tfree\n",
+  "stderr": "",
+  "execution_time_ms": 1911
+}

@@ -1,0 +1,58 @@
+{
+  "query": "SELECT id, email, plan, planTypeBiz, planTypeFounder, bizMessageLimit, founderMessageLimit, bizMessagesUsed, founderMessagesUsed, hasUsedBizStarter FROM users LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute SELECT id, email, plan, planTypeBiz, planTypeFounder, bizMessageLimit, founderMessageLimit, bizMessagesUsed, founderMessagesUsed, hasUsedBizStarter FROM users LIMIT 5;",
+  "rows": [
+    {
+      "id": "1",
+      "email": "progemini190@gmail.com",
+      "plan": "bizpilot",
+      "planTypeBiz": "free",
+      "planTypeFounder": "free",
+      "bizMessageLimit": "5",
+      "founderMessageLimit": "5",
+      "bizMessagesUsed": "0",
+      "founderMessagesUsed": "1",
+      "hasUsedBizStarter": "false"
+    },
+    {
+      "id": "360001",
+      "email": "test@pilothub.mm",
+      "plan": "bizpilot",
+      "planTypeBiz": "free",
+      "planTypeFounder": "free",
+      "bizMessageLimit": "5",
+      "founderMessageLimit": "5",
+      "bizMessagesUsed": "0",
+      "founderMessagesUsed": "0",
+      "hasUsedBizStarter": "false"
+    },
+    {
+      "id": "1770024",
+      "email": "thurakyawlay.tk@gmail.com",
+      "plan": "founderpilot",
+      "planTypeBiz": "free",
+      "planTypeFounder": "free",
+      "bizMessageLimit": "5",
+      "founderMessageLimit": "5",
+      "bizMessagesUsed": "0",
+      "founderMessagesUsed": "0",
+      "hasUsedBizStarter": "false"
+    },
+    {
+      "id": "1770040",
+      "email": "thurakyawlay.tk@gmail.com",
+      "plan": "bizpilot",
+      "planTypeBiz": "free",
+      "planTypeFounder": "free",
+      "bizMessageLimit": "5",
+      "founderMessageLimit": "5",
+      "bizMessagesUsed": "0",
+      "founderMessagesUsed": "0",
+      "hasUsedBizStarter": "false"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\temail\tplan\tplanTypeBiz\tplanTypeFounder\tbizMessageLimit\tfounderMessageLimit\tbizMessagesUsed\tfounderMessagesUsed\thasUsedBizStarter\n1\tprogemini190@gmail.com\tbizpilot\tfree\tfree\t5\t5\t0\t1\tfalse\n360001\ttest@pilothub.mm\tbizpilot\tfree\tfree\t5\t5\t0\t0\tfalse\n1770024\tthurakyawlay.tk@gmail.com\tfounderpilot\tfree\tfree\t5\t5\t0\t0\tfalse\n1770040\tthurakyawlay.tk@gmail.com\tbizpilot\tfree\tfree\t5\t5\t0\t0\tfalse\n",
+  "stderr": "",
+  "execution_time_ms": 1857
+}

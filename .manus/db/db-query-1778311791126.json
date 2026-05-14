@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE `applications` MODIFY COLUMN `plan` varchar(64) DEFAULT 'free';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute ALTER TABLE `applications` MODIFY COLUMN `plan` varchar(64) DEFAULT 'free';",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1885
+}

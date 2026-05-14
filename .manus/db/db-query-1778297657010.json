@@ -1,0 +1,24 @@
+{
+  "query": "SELECT id, userId, plan, status, amount FROM payments ORDER BY id DESC LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute SELECT id, userId, plan, status, amount FROM payments ORDER BY id DESC LIMIT 10;",
+  "rows": [
+    {
+      "id": "30001",
+      "userId": "1",
+      "plan": "bizpilot",
+      "status": "confirmed",
+      "amount": "100000"
+    },
+    {
+      "id": "1",
+      "userId": "360001",
+      "plan": "bizpilot",
+      "status": "confirmed",
+      "amount": "100000"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tuserId\tplan\tstatus\tamount\n30001\t1\tbizpilot\tconfirmed\t100000\n1\t360001\tbizpilot\tconfirmed\t100000\n",
+  "stderr": "",
+  "execution_time_ms": 1803
+}

@@ -1,0 +1,9 @@
+{
+  "query": "UPDATE applications SET plan = 'free' WHERE plan = 'bizpilot' AND status = 'approved';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute UPDATE applications SET plan = 'free' WHERE plan = 'bizpilot' AND status = 'approved';",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1796
+}

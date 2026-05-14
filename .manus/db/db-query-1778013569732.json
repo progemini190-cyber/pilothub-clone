@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE `externalApiTokens` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`name` varchar(128) NOT NULL,\n\t`token` varchar(256) NOT NULL,\n\t`isActive` enum('true','false') DEFAULT 'true',\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `externalApiTokens_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `externalApiTokens_token_unique` UNIQUE(`token`)\n);\nCREATE TABLE `systemSettings` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`key` varchar(128) NOT NULL,\n\t`value` text,\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `systemSettings_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `systemSettings_key_unique` UNIQUE(`key`)\n)",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute CREATE TABLE `externalApiTokens` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`name` varchar(128) NOT NULL,\n\t`token` varchar(256) NOT NULL,\n\t`isActive` enum('true','false') DEFAULT 'true',\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `externalApiTokens_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `externalApiTokens_token_unique` UNIQUE(`token`)\n);\nCREATE TABLE `systemSettings` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`key` varchar(128) NOT NULL,\n\t`value` text,\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `systemSettings_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `systemSettings_key_unique` UNIQUE(`key`)\n)",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1967
+}

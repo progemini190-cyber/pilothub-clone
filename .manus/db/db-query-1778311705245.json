@@ -1,0 +1,24 @@
+{
+  "query": "SELECT id, fullName, email, plan, status FROM applications ORDER BY id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute SELECT id, fullName, email, plan, status FROM applications ORDER BY id;",
+  "rows": [
+    {
+      "id": "1",
+      "fullName": "CKO",
+      "email": "thurakyawlay.tk@gmail.com",
+      "plan": "free",
+      "status": "approved"
+    },
+    {
+      "id": "30001",
+      "fullName": "cko tester",
+      "email": "progemini190@gmail.com",
+      "plan": "free",
+      "status": "approved"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tfullName\temail\tplan\tstatus\n1\tCKO\tthurakyawlay.tk@gmail.com\tfree\tapproved\n30001\tcko tester\tprogemini190@gmail.com\tfree\tapproved\n",
+  "stderr": "",
+  "execution_time_ms": 1796
+}

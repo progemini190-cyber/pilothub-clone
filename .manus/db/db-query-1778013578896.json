@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE `payments` MODIFY COLUMN `userId` int;\nALTER TABLE `payments` ADD COLUMN IF NOT EXISTS `screenshotUrl` text;\nALTER TABLE `payments` ADD COLUMN IF NOT EXISTS `source` varchar(32) DEFAULT 'website';\nALTER TABLE `users` ADD COLUMN IF NOT EXISTS `freeBizCount` int NOT NULL DEFAULT 10;\nALTER TABLE `users` ADD COLUMN IF NOT EXISTS `freeFounderCount` int NOT NULL DEFAULT 5",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4HoDeCVitECkxie.c226e64aba2e --database 5a5u5kwk4NCwBqDBV7pp8W --execute ALTER TABLE `payments` MODIFY COLUMN `userId` int;\nALTER TABLE `payments` ADD COLUMN IF NOT EXISTS `screenshotUrl` text;\nALTER TABLE `payments` ADD COLUMN IF NOT EXISTS `source` varchar(32) DEFAULT 'website';\nALTER TABLE `users` ADD COLUMN IF NOT EXISTS `freeBizCount` int NOT NULL DEFAULT 10;\nALTER TABLE `users` ADD COLUMN IF NOT EXISTS `freeFounderCount` int NOT NULL DEFAULT 5",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 3163
+}
