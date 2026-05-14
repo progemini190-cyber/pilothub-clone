@@ -4,7 +4,7 @@ import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 
-const LOGO_URL = "/manus-storage/pilothub-logo_5dd5446d.png";
+import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 export default function LoginRequired() {
   const [, setLocation] = useLocation();

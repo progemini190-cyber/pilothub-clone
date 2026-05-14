@@ -4,7 +4,7 @@ import { getLoginUrl } from "@/const";
 import { Check, Zap, Star, Crown, Lock } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
-const LOGO_URL = "/manus-storage/pilothub-logo_5dd5446d.png";
+import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 const faqs = [
   {

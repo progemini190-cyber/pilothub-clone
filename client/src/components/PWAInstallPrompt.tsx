@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Download, X, Smartphone } from "lucide-react";
+import { PILOTHUB_LOGO_URL } from "@/lib/siteAssets";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -77,7 +78,7 @@ export function PWAInstallPrompt() {
         <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
           style={{ background: "oklch(72% 0.18 162 / 0.15)", border: "1px solid oklch(72% 0.18 162 / 0.3)" }}>
           <img
-            src="/manus-storage/pilothub-logo_5dd5446d.png"
+            src={PILOTHUB_LOGO_URL}
             alt="PilotHub"
             className="w-7 h-7 rounded-lg object-cover"
           />

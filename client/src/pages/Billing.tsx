@@ -6,7 +6,7 @@ import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
-const LOGO_URL = "/manus-storage/pilothub-logo_5dd5446d.png";
+import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 type PlanId = "bizpilot-starter" | "bizpilot-pro" | "founderpilot-starter" | "founderpilot-pro";
 

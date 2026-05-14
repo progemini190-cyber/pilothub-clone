@@ -3,8 +3,7 @@ import { useLocation } from "wouter";
 import { Menu, X, LogIn } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
-
-const LOGO_URL = "/manus-storage/pilothub-logo_5dd5446d.png";
+import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 export default function Home() {
   const [, setLocation] = useLocation();

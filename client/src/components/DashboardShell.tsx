@@ -7,7 +7,7 @@ import {
   LogOut, CreditCard, Zap, Lightbulb, DollarSign, Menu, X, ChevronRight, Globe, Megaphone
 } from "lucide-react";
 
-const LOGO_URL = "/manus-storage/pilothub-logo_5dd5446d.png";
+import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 interface DashboardShellProps {
   children: ReactNode;

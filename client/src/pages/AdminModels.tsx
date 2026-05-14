@@ -5,7 +5,7 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { Zap, Lightbulb, Save, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-const LOGO_URL = "/manus-storage/pilothub-logo_5dd5446d.png";
+import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 const GEMINI_MODELS = [
   { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (Recommended)" },

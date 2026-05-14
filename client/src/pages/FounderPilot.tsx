@@ -7,7 +7,7 @@ import { Send, Plus, MessageSquare, Lock, Brain, User } from "lucide-react";
 import { Streamdown } from "streamdown";
 import { toast } from "sonner";
 
-const LOGO_URL = "/manus-storage/pilothub-logo_5dd5446d.png";
+import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 const QUICK_PROMPTS = [
   "Startup ကို ဘယ်လို investor ဆီ pitch လုပ်ရမလဲ?",
