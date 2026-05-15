@@ -33,6 +33,22 @@ const SYSTEM_ERROR_MSG =
 const ALREADY_LINKED_MSG =
   "အကောင့် ချိတ်ဆက်ပြီးသားဖြစ်ပါသည်။ စာသားပို့ပြီး မေးမြန်းနိုင်ပါပြီ။";
 
+/** Reply keyboard row label — must match Telegram `KeyboardButton.text` exactly. */
+const CONTACT_TEAM_BUTTON_TEXT = "📞 ChatPilot Team သို့ ဆက်သွယ်ရန်";
+
+const CONTACT_TEAM_REPLY_MSG =
+  "ChatPilot Team သို့ ဆက်သွယ်ရန် အောက်ပါ Link သို့ ဝင်ရောက်ပါ 👇\n\nhttps://t.me/YOUR_SALE_AGENT_LINK";
+
+/**
+ * Shown under the text input on every bot reply.
+ * Telegram API field is `is_persistent` (not `persistent`).
+ */
+const PERSISTENT_REPLY_KEYBOARD = {
+  keyboard: [[{ text: CONTACT_TEAM_BUTTON_TEXT }]],
+  resize_keyboard: true,
+  is_persistent: true,
+} as const;
+
 type TelegramUpdate = {
   message?: {
     message_id: number;
@@ -89,7 +105,11 @@ async function sendTelegramMessage(
     const response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        reply_markup: PERSISTENT_REPLY_KEYBOARD,
+      }),
     });
     if (!response.ok) {
       const body = await response.text();
@@ -265,6 +285,23 @@ export function registerTelegramRoutes(app: Express): void {
     let chatId: string | undefined;
 
     try {
+      const body = req.body as { message?: { text?: string; chat?: { id?: number } } };
+      if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
+        await ensureTelegramSchema();
+        const advisor = parseAdvisor(req);
+        botToken = getTelegramBotToken(advisor);
+        chatId =
+          body.message.chat?.id != null ? String(body.message.chat.id) : undefined;
+        if (botToken && chatId) {
+          await sendTelegramMessage(botToken, chatId, CONTACT_TEAM_REPLY_MSG);
+        } else if (!botToken) {
+          console.error(
+            `[Telegram] No bot token for ${advisor}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`,
+          );
+        }
+        return;
+      }
+
       await ensureTelegramSchema();
 
       const advisor = parseAdvisor(req);
