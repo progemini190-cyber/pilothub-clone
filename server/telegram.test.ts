@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasTelegramCredits } from "./db";
+import { hasTelegramCredits, isTelegramPlanActive } from "./db";
 
 describe("hasTelegramCredits", () => {
   it("denies free-tier users even with default website limits", () => {
@@ -39,5 +39,27 @@ describe("hasTelegramCredits", () => {
         "bizpilot",
       ),
     ).toBe(false);
+  });
+
+  it("denies when plan expiry date has passed", () => {
+    const yesterday = new Date(Date.now() - 86400000);
+    expect(isTelegramPlanActive(yesterday)).toBe(false);
+    expect(
+      hasTelegramCredits(
+        { bizMessageLimit: 20, planTypeBiz: "starter", planExpiryDate: yesterday },
+        "bizpilot",
+      ),
+    ).toBe(false);
+  });
+
+  it("allows when plan expiry is in the future", () => {
+    const nextMonth = new Date(Date.now() + 30 * 86400000);
+    expect(isTelegramPlanActive(nextMonth)).toBe(true);
+    expect(
+      hasTelegramCredits(
+        { bizMessageLimit: 20, planTypeBiz: "starter", planExpiryDate: nextMonth },
+        "bizpilot",
+      ),
+    ).toBe(true);
   });
 });

@@ -21,6 +21,7 @@ import AdminPayments from "./pages/AdminPayments";
 import AdminApplications from "./pages/AdminApplications";
 import AdminExternalAPI from "./pages/AdminExternalAPI";
 import AdminAnnouncements from "./pages/AdminAnnouncements";
+import AdminTelegramBots from "./pages/AdminTelegramBots";
 import LoginRequired from "./pages/LoginRequired";
 import { useAuth } from "./_core/hooks/useAuth";
 import { Loader2 } from "lucide-react";
@@ -66,6 +67,7 @@ function Router() {
       <Route path={"/admin/applications"} component={AdminApplications} />
       <Route path={"/admin/external-api"} component={AdminExternalAPI} />
       <Route path={"/admin/announcements"} component={AdminAnnouncements} />
+      <Route path={"/admin/telegram-bots"} component={AdminTelegramBots} />
       <Route path={"/login-required"} component={LoginRequired} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}

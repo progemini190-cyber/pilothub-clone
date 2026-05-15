@@ -187,20 +187,35 @@ export function registerTelegramRoutes(app: Express): void {
   });
 }
 
-export async function generateTelegramActivationToken(userId: number): Promise<{
+/** Default bot username placeholder — override via TELEGRAM_BIZ_BOT_USERNAME env. */
+export const TELEGRAM_BOT_USERNAME_PLACEHOLDER =
+  process.env.TELEGRAM_BIZ_BOT_USERNAME?.trim() || "Your_Bot_Username";
+
+export function buildTelegramActivationLink(token: string, botUsername?: string): string {
+  const username = botUsername?.trim() || TELEGRAM_BOT_USERNAME_PLACEHOLDER;
+  return `https://t.me/${username}?start=${token}`;
+}
+
+export async function generateTelegramActivationToken(
+  userId: number,
+  botUsername?: string,
+): Promise<{
   token: string;
   userId: number;
+  activationLink: string;
   deepLinkBiz: string | null;
   deepLinkFounder: string | null;
 }> {
   const token = nanoid(32);
   const row = await db.createBotActivationToken(userId, token);
-  const bizBot = process.env.TELEGRAM_BIZ_BOT_USERNAME?.trim();
+  const bizBot = botUsername?.trim() || process.env.TELEGRAM_BIZ_BOT_USERNAME?.trim();
   const founderBot = process.env.TELEGRAM_FOUNDER_BOT_USERNAME?.trim();
+  const activationLink = buildTelegramActivationLink(token, bizBot);
   return {
     token: row.token,
     userId: row.userId,
-    deepLinkBiz: bizBot ? `https://t.me/${bizBot}?start=${token}` : null,
-    deepLinkFounder: founderBot ? `https://t.me/${founderBot}?start=${token}` : null,
+    activationLink,
+    deepLinkBiz: bizBot ? buildTelegramActivationLink(token, bizBot) : activationLink,
+    deepLinkFounder: founderBot ? buildTelegramActivationLink(token, founderBot) : null,
   };
 }

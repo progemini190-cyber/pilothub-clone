@@ -4,7 +4,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import {
   LayoutDashboard, MessageSquare, Settings, Users, Key, FileText,
-  LogOut, CreditCard, Zap, Lightbulb, DollarSign, Menu, X, ChevronRight, Globe, Megaphone
+  LogOut, CreditCard, Zap, Lightbulb, DollarSign, Menu, X, ChevronRight, Globe, Megaphone, Bot
 } from "lucide-react";
 
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
@@ -80,6 +80,7 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
     { label: "API Keys", href: "/admin/keys", icon: Key, tab: "keys" },
     { label: "External API", href: "/admin/external-api", icon: Globe, tab: "external-api" },
     { label: "Announcements", href: "/admin/announcements", icon: Megaphone, tab: "announcements" },
+    { label: "Telegram Bots", href: "/admin/telegram-bots", icon: Bot, tab: "telegram-bots" },
   ];
 
   const navItems = isAdminShell ? adminNavItems : userNavItems;

@@ -729,6 +729,64 @@ export const appRouter = router({
         }),
     }),
 
+    // ── Telegram bot management ──
+    telegram: router({
+      list: publicProcedure.query(async ({ ctx }) => {
+        await requireAdmin(ctx);
+        const users = await db.listTelegramBotUsers();
+        return { users };
+      }),
+      updatePlan: publicProcedure
+        .input(
+          z.object({
+            userId: z.number(),
+            bizMessageLimit: z.number().int().min(0).optional(),
+            founderMessageLimit: z.number().int().min(0).optional(),
+            addBizMessages: z.number().int().min(0).optional(),
+            addFounderMessages: z.number().int().min(0).optional(),
+            planExpiryDate: z.string().datetime().nullable().optional(),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          await requireAdmin(ctx);
+          try {
+            await db.updateTelegramUserPlan({
+              userId: input.userId,
+              bizMessageLimit: input.bizMessageLimit,
+              founderMessageLimit: input.founderMessageLimit,
+              addBizMessages: input.addBizMessages,
+              addFounderMessages: input.addFounderMessages,
+              planExpiryDate:
+                input.planExpiryDate === undefined
+                  ? undefined
+                  : input.planExpiryDate
+                    ? new Date(input.planExpiryDate)
+                    : null,
+            });
+            return { success: true };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to update plan";
+            throw new TRPCError({ code: "BAD_REQUEST", message });
+          }
+        }),
+      generateLink: publicProcedure
+        .input(
+          z.object({
+            userId: z.number(),
+            botUsername: z.string().min(1).optional(),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          await requireAdmin(ctx);
+          try {
+            return await generateTelegramActivationToken(input.userId, input.botUsername);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to generate link";
+            throw new TRPCError({ code: "BAD_REQUEST", message });
+          }
+        }),
+    }),
+
     // ── External API Token management ──
     externalTokens: router({
       list: publicProcedure.query(async ({ ctx }) => {

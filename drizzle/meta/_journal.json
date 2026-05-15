@@ -15,6 +15,13 @@
       "when": 1779000000000,
       "tag": "0001_telegram_bots",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1779100000000,
+      "tag": "0002_plan_expiry",
+      "breakpoints": true
     }
   ]
 }

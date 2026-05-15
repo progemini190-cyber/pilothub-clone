@@ -849,16 +849,24 @@ export async function markActivationTokenUsed(tokenId: number) {
     .where(eq(botActivationTokens.id, tokenId));
 }
 
-/** Paid Telegram access: limit > 0 and not on free website tier. */
+/** True when plan expiry is unset or still in the future. */
+export function isTelegramPlanActive(planExpiryDate: Date | null | undefined): boolean {
+  if (!planExpiryDate) return true;
+  return new Date(planExpiryDate).getTime() > Date.now();
+}
+
+/** Paid Telegram access: active expiry, limit > 0, not on free website tier. */
 export function hasTelegramCredits(
   user: {
     bizMessageLimit?: number | null;
     founderMessageLimit?: number | null;
     planTypeBiz?: string | null;
     planTypeFounder?: string | null;
+    planExpiryDate?: Date | null;
   },
   advisor: AdvisorSlug,
 ): boolean {
+  if (!isTelegramPlanActive(user.planExpiryDate ?? null)) return false;
   if (advisor === "bizpilot") {
     const limit = user.bizMessageLimit ?? 0;
     const planType = user.planTypeBiz ?? "free";
@@ -867,6 +875,71 @@ export function hasTelegramCredits(
   const limit = user.founderMessageLimit ?? 0;
   const planType = user.planTypeFounder ?? "free";
   return limit > 0 && planType !== "free";
+}
+
+export async function listTelegramBotUsers() {
+  const db = await assertDatabase();
+  return db
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      telegramChatId: users.telegramChatId,
+      bizMessageLimit: users.bizMessageLimit,
+      founderMessageLimit: users.founderMessageLimit,
+      planTypeBiz: users.planTypeBiz,
+      planTypeFounder: users.planTypeFounder,
+      planExpiryDate: users.planExpiryDate,
+    })
+    .from(users)
+    .orderBy(desc(users.createdAt));
+}
+
+export async function updateTelegramUserPlan(input: {
+  userId: number;
+  bizMessageLimit?: number;
+  founderMessageLimit?: number;
+  addBizMessages?: number;
+  addFounderMessages?: number;
+  planExpiryDate?: Date | null;
+}) {
+  const db = await assertDatabase();
+  const user = await getUserById(input.userId);
+  if (!user) throw new Error("User not found");
+
+  const updateSet: Record<string, unknown> = { updatedAt: new Date() };
+
+  if (input.planExpiryDate !== undefined) {
+    updateSet.planExpiryDate = input.planExpiryDate;
+  }
+
+  let bizLimit = user.bizMessageLimit ?? 0;
+  if (input.bizMessageLimit !== undefined) {
+    bizLimit = input.bizMessageLimit;
+  } else if (input.addBizMessages !== undefined) {
+    bizLimit = bizLimit + input.addBizMessages;
+  }
+  if (input.bizMessageLimit !== undefined || input.addBizMessages !== undefined) {
+    updateSet.bizMessageLimit = Math.max(0, bizLimit);
+    if (bizLimit > 0 && (user.planTypeBiz ?? "free") === "free") {
+      updateSet.planTypeBiz = "starter";
+    }
+  }
+
+  let founderLimit = user.founderMessageLimit ?? 0;
+  if (input.founderMessageLimit !== undefined) {
+    founderLimit = input.founderMessageLimit;
+  } else if (input.addFounderMessages !== undefined) {
+    founderLimit = founderLimit + input.addFounderMessages;
+  }
+  if (input.founderMessageLimit !== undefined || input.addFounderMessages !== undefined) {
+    updateSet.founderMessageLimit = Math.max(0, founderLimit);
+    if (founderLimit > 0 && (user.planTypeFounder ?? "free") === "free") {
+      updateSet.planTypeFounder = "starter";
+    }
+  }
+
+  await db.update(users).set(updateSet as Record<string, unknown>).where(eq(users.id, input.userId));
 }
 
 export async function decrementTelegramMessageLimit(userId: number, advisor: AdvisorSlug) {
