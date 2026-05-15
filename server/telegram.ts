@@ -36,8 +36,15 @@ const ALREADY_LINKED_MSG =
 /** Reply keyboard row label — must match Telegram `KeyboardButton.text` exactly. */
 const CONTACT_TEAM_BUTTON_TEXT = "📞 ChatPilot Team သို့ ဆက်သွယ်ရန်";
 
+/** Replace YOUR_SALE_AGENT in both URLs with your sales Telegram username (no @). */
 const CONTACT_TEAM_REPLY_MSG =
-  "ChatPilot Team သို့ ဆက်သွယ်ရန် အောက်ပါ Link သို့ ဝင်ရောက်ပါ 👇\n\nhttps://t.me/chatpilot_ai_bot";
+  `မည်သည့်အကြောင်းအရာအတွက် ဆက်သွယ်လိုပါသလဲ ခင်ဗျာ? 👇
+
+၁။ 💎 အကောင့်သက်တမ်း (သို့) အကြိမ်ရေ တိုးရန်
+👉 https://t.me/YOUR_SALE_AGENT?text=မင်္ဂလာပါ၊%20အကောင့်သက်တမ်းတိုးချင်လို့ပါ
+
+၂။ 💬 အခြားသိလိုသည်များ မေးမြန်းရန်
+👉 https://t.me/YOUR_SALE_AGENT?text=မင်္ဂလာပါ၊%20အခြားအကြောင်းအရာလေး%20မေးချင်လို့ပါ`;
 
 /**
  * Shown under the text input on every bot reply.
