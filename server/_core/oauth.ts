@@ -378,6 +378,11 @@ export function registerOAuthRoutes(app: Express) {
         return;
       }
 
+      const dbReady = await db.getDb();
+      if (!dbReady) {
+        console.error("[Google OAuth] Database not available — check TURSO_DATABASE_URL / TURSO_AUTH_TOKEN");
+      }
+
       const login = await resolveGoogleLogin(userInfo);
 
       try {

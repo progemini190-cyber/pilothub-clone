@@ -109,6 +109,19 @@ describe("resolveGoogleLogin", () => {
     expect(result.upsert.status).toBe("pending");
   });
 
+  it("promotes ADMIN_EMAIL to admin and approves dashboard access", async () => {
+    const result = await resolveGoogleLogin({
+      sub: googleSub,
+      email: "progemini190@gmail.com",
+      name: "Admin User",
+    });
+
+    expect(result.redirectPath).toBe("/app");
+    expect(result.isApproved).toBe(true);
+    expect(result.upsert.role).toBe("admin");
+    expect(result.upsert.status).toBe("active");
+  });
+
   it("approves via approved application when no user row yet", async () => {
     (db.getApprovedApplicationByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: 5,

@@ -1,5 +1,6 @@
 import type { InsertUser, User } from "../../drizzle/schema";
 import * as db from "../db";
+import { isAdminEmail, shouldGrantAdminRole } from "./adminAccess";
 import { ENV } from "./env";
 
 export type GoogleUserInfo = {
@@ -58,15 +59,23 @@ export async function resolveGoogleLogin(userInfo: GoogleUserInfo): Promise<Goog
   }
 
   const isOwner = Boolean(ENV.ownerGoogleSub && googleSub === ENV.ownerGoogleSub);
+  const isAdmin = Boolean(userEmail && isAdminEmail(userEmail));
   const isApproved =
     isOwner ||
+    isAdmin ||
     isUserApproved(existingUser) ||
     Boolean(approvedApplication);
 
   const userStatus = existingUser?.status
     ?? (isApproved ? "active" : latestApplication?.status === "approved" ? "active" : "pending");
 
-  console.log("User Login Attempt:", userEmail, "Status:", userStatus);
+  const grantAdmin = shouldGrantAdminRole({
+    email: userEmail,
+    googleSub,
+    ownerGoogleSub: ENV.ownerGoogleSub,
+  });
+
+  console.log("User Login Attempt:", userEmail, "Status:", userStatus, "Role:", grantAdmin ? "admin" : existingUser?.role ?? "user");
 
   const upsert: InsertUser = {
     openId: googleSub,
@@ -76,7 +85,10 @@ export async function resolveGoogleLogin(userInfo: GoogleUserInfo): Promise<Goog
     lastSignedIn: new Date(),
   };
 
-  if (!existingUser) {
+  if (grantAdmin) {
+    upsert.role = "admin";
+    upsert.status = "active";
+  } else if (!existingUser) {
     upsert.status = isApproved ? "active" : "pending";
   } else if (isApproved && existingUser.status !== "active") {
     upsert.status = "active";

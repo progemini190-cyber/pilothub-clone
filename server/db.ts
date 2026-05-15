@@ -16,24 +16,86 @@ import {
   announcements,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { shouldGrantAdminRole } from "./_core/adminAccess";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _dbLogged = false;
+
+function resolveDatabaseUrl(): string | undefined {
+  const turso = process.env.TURSO_DATABASE_URL?.trim();
+  if (turso) return turso;
+  return process.env.DATABASE_URL?.trim() || undefined;
+}
+
+function maskDatabaseUrl(url: string): string {
+  try {
+    const parsed = new URL(url.replace(/^libsql:/, "https:"));
+    return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return url.startsWith("file:") ? "file:***" : "unknown";
+  }
+}
 
 export async function getDb() {
   if (_db) return _db;
-  const url = process.env.TURSO_DATABASE_URL ?? process.env.DATABASE_URL;
-  if (!url) return null;
+
+  const url = resolveDatabaseUrl();
+  if (!url) {
+    if (!_dbLogged) {
+      console.error(
+        "[Database] TURSO_DATABASE_URL (or DATABASE_URL) is not set — all queries return empty",
+      );
+      _dbLogged = true;
+    }
+    return null;
+  }
+
+  if (ENV.isProduction && url.startsWith("file:")) {
+    console.error(
+      "[Database] Refusing file: SQLite in production. Set TURSO_DATABASE_URL to your Turso database.",
+    );
+    return null;
+  }
+
+  const needsToken = url.includes("turso.io");
+  const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
+  if (needsToken && !authToken && !url.startsWith("file:")) {
+    console.error(
+      "[Database] TURSO_AUTH_TOKEN is required for remote Turso/libsql URLs",
+      { target: maskDatabaseUrl(url) },
+    );
+    return null;
+  }
+
   try {
     const client = createClient({
       url,
-      authToken: process.env.TURSO_AUTH_TOKEN ?? undefined,
+      authToken: authToken || undefined,
     });
     _db = drizzle(client);
+    if (!_dbLogged) {
+      console.info("[Database] Connected", {
+        target: maskDatabaseUrl(url),
+        source: process.env.TURSO_DATABASE_URL ? "TURSO_DATABASE_URL" : "DATABASE_URL",
+        hasAuthToken: Boolean(authToken),
+      });
+      _dbLogged = true;
+    }
     return _db;
   } catch (error) {
-    console.warn("[Database] Failed to connect:", error);
+    console.error("[Database] Failed to connect:", error, { target: maskDatabaseUrl(url) });
     return null;
   }
+}
+
+export async function assertDatabase() {
+  const database = await getDb();
+  if (!database) {
+    throw new Error(
+      "Database unavailable. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in your deployment environment.",
+    );
+  }
+  return database;
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
@@ -55,7 +117,16 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     textFields.forEach(assignNullable);
     if (user.lastSignedIn !== undefined) { values.lastSignedIn = user.lastSignedIn; updateSet.lastSignedIn = user.lastSignedIn; }
     if (user.role !== undefined) { values.role = user.role; updateSet.role = user.role; }
-    else if (user.openId === ENV.ownerGoogleSub) { values.role = 'admin'; updateSet.role = 'admin'; }
+    else if (
+      shouldGrantAdminRole({
+        email: user.email,
+        googleSub: user.openId,
+        ownerGoogleSub: ENV.ownerGoogleSub,
+      })
+    ) {
+      values.role = "admin";
+      updateSet.role = "admin";
+    }
     if ((user as any).status !== undefined) { (values as any).status = (user as any).status; updateSet.status = (user as any).status; }
     if (!values.lastSignedIn) values.lastSignedIn = new Date();
     if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
@@ -347,8 +418,7 @@ export async function getActiveSystemPrompt(modelSlug: "bizpilot" | "founderpilo
 }
 
 export async function listSystemPrompts() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   return db.select().from(systemPrompts).orderBy(desc(systemPrompts.updatedAt));
 }
 
@@ -425,8 +495,7 @@ export async function getActiveApiKey(provider: string) {
 }
 
 export async function listAllApiKeys() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   const keys = await db.select().from(apiKeys).orderBy(desc(apiKeys.createdAt));
   return keys.map(k => ({ ...k, keyValue: k.keyValue.slice(0, 8) + '...' + k.keyValue.slice(-4), keyValueFull: k.keyValue }));
 }
@@ -454,8 +523,7 @@ export async function setApiKeyActive(keyId: number, provider: string) {
 // ── User management helpers ──
 
 export async function listAllUsers() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   return db.select().from(users).orderBy(desc(users.createdAt));
 }
 
@@ -529,8 +597,7 @@ export async function createPayment(input: {
 }
 
 export async function listAllPayments() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   return db.select().from(payments).orderBy(desc(payments.createdAt));
 }
 
@@ -628,8 +695,7 @@ export async function createApplication(input: {
 }
 
 export async function listAllApplications() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   return db.select().from(applications).orderBy(desc(applications.createdAt));
 }
 

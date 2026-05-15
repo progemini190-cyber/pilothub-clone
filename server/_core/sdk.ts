@@ -5,6 +5,7 @@ import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
+import { isAdminEmail } from "./adminAccess";
 import { ENV } from "./env";
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -111,15 +112,22 @@ class SessionService {
     }
 
     const signedInAt = new Date();
-    const user = await db.getUserByOpenId(session.openId);
+    let user = await db.getUserByOpenId(session.openId);
 
     if (!user) {
       throw ForbiddenError("User not found");
     }
 
+    if (user.email && isAdminEmail(user.email) && user.role !== "admin") {
+      await db.updateUserRole(user.id, "admin");
+      user = { ...user, role: "admin" as const };
+    }
+
     await db.upsertUser({
       openId: user.openId,
+      email: user.email,
       lastSignedIn: signedInAt,
+      role: user.role === "admin" ? "admin" : undefined,
     });
 
     return user;

@@ -34,7 +34,9 @@ var init_env = __esm({
        * Google `sub` for the project owner — first login upserts this user as admin.
        * Legacy: OWNER_OPEN_ID (Manus openId) is still read for one release if unset.
        */
-      ownerGoogleSub: process.env.GOOGLE_OWNER_SUB ?? process.env.OWNER_OPEN_ID ?? ""
+      ownerGoogleSub: process.env.GOOGLE_OWNER_SUB ?? process.env.OWNER_OPEN_ID ?? "",
+      /** Comma-separated emails auto-promoted to admin on Google login (see adminAccess.ts). */
+      adminEmail: process.env.ADMIN_EMAIL ?? ""
     };
   }
 });
@@ -135,7 +137,7 @@ var NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
 
 // server/db.ts
 import { createClient } from "@libsql/client";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc, asc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 
 // drizzle/schema.ts
@@ -271,22 +273,96 @@ var announcements = sqliteTable("announcements", {
 
 // server/db.ts
 init_env();
+
+// server/_core/adminAccess.ts
+var DEFAULT_ADMIN_EMAILS = ["progemini190@gmail.com"];
+function getAdminEmails() {
+  const fromEnv = (process.env.ADMIN_EMAIL ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return [.../* @__PURE__ */ new Set([...DEFAULT_ADMIN_EMAILS, ...fromEnv])];
+}
+function isAdminEmail(email) {
+  if (!email) return false;
+  return getAdminEmails().includes(normalizeEmail(email));
+}
+function shouldGrantAdminRole(input) {
+  if (input.email && isAdminEmail(input.email)) return true;
+  if (input.ownerGoogleSub && input.googleSub && input.googleSub === input.ownerGoogleSub) {
+    return true;
+  }
+  return false;
+}
+
+// server/db.ts
 var _db = null;
+var _dbLogged = false;
+function resolveDatabaseUrl() {
+  const turso = process.env.TURSO_DATABASE_URL?.trim();
+  if (turso) return turso;
+  return process.env.DATABASE_URL?.trim() || void 0;
+}
+function maskDatabaseUrl(url) {
+  try {
+    const parsed = new URL(url.replace(/^libsql:/, "https:"));
+    return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return url.startsWith("file:") ? "file:***" : "unknown";
+  }
+}
 async function getDb() {
   if (_db) return _db;
-  const url = process.env.TURSO_DATABASE_URL ?? process.env.DATABASE_URL;
-  if (!url) return null;
+  const url = resolveDatabaseUrl();
+  if (!url) {
+    if (!_dbLogged) {
+      console.error(
+        "[Database] TURSO_DATABASE_URL (or DATABASE_URL) is not set \u2014 all queries return empty"
+      );
+      _dbLogged = true;
+    }
+    return null;
+  }
+  if (ENV.isProduction && url.startsWith("file:")) {
+    console.error(
+      "[Database] Refusing file: SQLite in production. Set TURSO_DATABASE_URL to your Turso database."
+    );
+    return null;
+  }
+  const needsToken = url.includes("turso.io");
+  const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
+  if (needsToken && !authToken && !url.startsWith("file:")) {
+    console.error(
+      "[Database] TURSO_AUTH_TOKEN is required for remote Turso/libsql URLs",
+      { target: maskDatabaseUrl(url) }
+    );
+    return null;
+  }
   try {
     const client = createClient({
       url,
-      authToken: process.env.TURSO_AUTH_TOKEN ?? void 0
+      authToken: authToken || void 0
     });
     _db = drizzle(client);
+    if (!_dbLogged) {
+      console.info("[Database] Connected", {
+        target: maskDatabaseUrl(url),
+        source: process.env.TURSO_DATABASE_URL ? "TURSO_DATABASE_URL" : "DATABASE_URL",
+        hasAuthToken: Boolean(authToken)
+      });
+      _dbLogged = true;
+    }
     return _db;
   } catch (error) {
-    console.warn("[Database] Failed to connect:", error);
+    console.error("[Database] Failed to connect:", error, { target: maskDatabaseUrl(url) });
     return null;
   }
+}
+async function assertDatabase() {
+  const database = await getDb();
+  if (!database) {
+    throw new Error(
+      "Database unavailable. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in your deployment environment."
+    );
+  }
+  return database;
 }
 async function upsertUser(user) {
   if (!user.openId) throw new Error("User openId is required for upsert");
@@ -314,7 +390,11 @@ async function upsertUser(user) {
     if (user.role !== void 0) {
       values.role = user.role;
       updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerGoogleSub) {
+    } else if (shouldGrantAdminRole({
+      email: user.email,
+      googleSub: user.openId,
+      ownerGoogleSub: ENV.ownerGoogleSub
+    })) {
       values.role = "admin";
       updateSet.role = "admin";
     }
@@ -345,11 +425,34 @@ async function getUserById(id) {
   const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
+function normalizeEmail(email) {
+  return email.trim().toLowerCase();
+}
 async function getUserByEmail(email) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  const normalized = normalizeEmail(email);
+  const result = await db.select().from(users).where(sql`lower(trim(${users.email})) = ${normalized}`).limit(1);
   return result.length > 0 ? result[0] : void 0;
+}
+async function linkUserToGoogleOpenId(userId, googleOpenId, fields) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const conflicting = await getUserByOpenId(googleOpenId);
+  if (conflicting && conflicting.id !== userId) {
+    if (conflicting.status === "pending" && conflicting.loginMethod === "google") {
+      await db.delete(users).where(eq(users.id, conflicting.id));
+    } else {
+      throw new Error("This Google account is already linked to another user");
+    }
+  }
+  const updateSet = {
+    openId: googleOpenId,
+    loginMethod: fields.loginMethod ?? "google",
+    lastSignedIn: /* @__PURE__ */ new Date()
+  };
+  if (fields.name !== void 0) updateSet.name = fields.name;
+  await db.update(users).set(updateSet).where(eq(users.id, userId));
 }
 async function getMessageUsage(userId, advisor) {
   const db = await getDb();
@@ -500,8 +603,7 @@ async function getActiveSystemPrompt(modelSlug) {
   return result[0]?.content ?? null;
 }
 async function listSystemPrompts() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   return db.select().from(systemPrompts).orderBy(desc(systemPrompts.updatedAt));
 }
 async function createSystemPromptVersion(input) {
@@ -550,8 +652,7 @@ async function getActiveApiKey(provider) {
   return result[0];
 }
 async function listAllApiKeys() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   const keys = await db.select().from(apiKeys).orderBy(desc(apiKeys.createdAt));
   return keys.map((k) => ({ ...k, keyValue: k.keyValue.slice(0, 8) + "..." + k.keyValue.slice(-4), keyValueFull: k.keyValue }));
 }
@@ -573,8 +674,7 @@ async function setApiKeyActive(keyId, provider) {
   await db.update(apiKeys).set({ isActive: "true" }).where(eq(apiKeys.id, keyId));
 }
 async function listAllUsers() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   return db.select().from(users).orderBy(desc(users.createdAt));
 }
 async function updateUserRole(userId, role) {
@@ -627,8 +727,7 @@ async function createPayment(input) {
   return row;
 }
 async function listAllPayments() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   return db.select().from(payments).orderBy(desc(payments.createdAt));
 }
 async function listUserPayments(userId) {
@@ -695,8 +794,7 @@ async function createApplication(input) {
   return row;
 }
 async function listAllApplications() {
-  const db = await getDb();
-  if (!db) return [];
+  const db = await assertDatabase();
   return db.select().from(applications).orderBy(desc(applications.createdAt));
 }
 async function getApplicationById(id) {
@@ -705,10 +803,23 @@ async function getApplicationById(id) {
   const result = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
   return result[0];
 }
+async function getApplicationByEmail(email) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const normalized = normalizeEmail(email);
+  const result = await db.select().from(applications).where(sql`lower(trim(${applications.email})) = ${normalized}`).orderBy(desc(applications.createdAt)).limit(1);
+  return result[0];
+}
 async function getApprovedApplicationByEmail(email) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(applications).where(eq(applications.email, email)).limit(1);
+  const normalized = normalizeEmail(email);
+  const result = await db.select().from(applications).where(
+    and(
+      sql`lower(trim(${applications.email})) = ${normalized}`,
+      eq(applications.status, "approved")
+    )
+  ).orderBy(desc(applications.createdAt)).limit(1);
   return result[0];
 }
 async function updateApplicationStatus(id, status, userId, notes) {
@@ -785,6 +896,81 @@ function getSessionCookieOptions(req) {
 
 // server/_core/oauth.ts
 init_env();
+
+// server/_core/googleLogin.ts
+init_env();
+function isUserApproved(user) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  return user.status === "active";
+}
+async function resolveGoogleLogin(userInfo) {
+  const googleSub = userInfo.sub;
+  const userEmail = userInfo.email ? normalizeEmail(userInfo.email) : null;
+  let userByOpenId = await getUserByOpenId(googleSub);
+  let userByEmail = userEmail ? await getUserByEmail(userEmail) : void 0;
+  if (userByEmail && userByEmail.openId !== googleSub) {
+    await linkUserToGoogleOpenId(userByEmail.id, googleSub, {
+      name: userInfo.name ?? userByEmail.name,
+      loginMethod: "google"
+    });
+    userByOpenId = await getUserByOpenId(googleSub);
+    userByEmail = userByOpenId;
+  }
+  const existingUser = userByOpenId ?? userByEmail;
+  let approvedApplication;
+  let latestApplication;
+  if (userEmail) {
+    try {
+      approvedApplication = await getApprovedApplicationByEmail(userEmail);
+      latestApplication = await getApplicationByEmail(userEmail);
+    } catch (dbErr) {
+      console.error("[Google OAuth] Application lookup failed (non-fatal):", dbErr);
+    }
+  }
+  const isOwner = Boolean(ENV.ownerGoogleSub && googleSub === ENV.ownerGoogleSub);
+  const isAdmin = Boolean(userEmail && isAdminEmail(userEmail));
+  const isApproved = isOwner || isAdmin || isUserApproved(existingUser) || Boolean(approvedApplication);
+  const userStatus = existingUser?.status ?? (isApproved ? "active" : latestApplication?.status === "approved" ? "active" : "pending");
+  const grantAdmin = shouldGrantAdminRole({
+    email: userEmail,
+    googleSub,
+    ownerGoogleSub: ENV.ownerGoogleSub
+  });
+  console.log("User Login Attempt:", userEmail, "Status:", userStatus, "Role:", grantAdmin ? "admin" : existingUser?.role ?? "user");
+  const upsert = {
+    openId: googleSub,
+    name: userInfo.name || existingUser?.name || null,
+    email: userEmail ?? userInfo.email ?? existingUser?.email ?? null,
+    loginMethod: "google",
+    lastSignedIn: /* @__PURE__ */ new Date()
+  };
+  if (grantAdmin) {
+    upsert.role = "admin";
+    upsert.status = "active";
+  } else if (!existingUser) {
+    upsert.status = isApproved ? "active" : "pending";
+  } else if (isApproved && existingUser.status !== "active") {
+    upsert.status = "active";
+  }
+  let redirectPath = "/app";
+  if (!isApproved) {
+    const hasExistingAccount = Boolean(existingUser || latestApplication);
+    if (hasExistingAccount && (existingUser?.status === "pending" || latestApplication?.status === "pending")) {
+      redirectPath = `/login-required?reason=pending&email=${encodeURIComponent(userEmail ?? "")}`;
+    } else {
+      redirectPath = `/login-required?reason=not_approved&email=${encodeURIComponent(userEmail ?? "")}`;
+    }
+  }
+  return {
+    sessionOpenId: googleSub,
+    redirectPath,
+    userStatus,
+    userEmail,
+    isApproved,
+    upsert
+  };
+}
 
 // shared/_core/errors.ts
 var HttpError = class extends Error {
@@ -870,13 +1056,19 @@ var SessionService = class {
       throw ForbiddenError("Invalid session cookie");
     }
     const signedInAt = /* @__PURE__ */ new Date();
-    const user = await getUserByOpenId(session.openId);
+    let user = await getUserByOpenId(session.openId);
     if (!user) {
       throw ForbiddenError("User not found");
     }
+    if (user.email && isAdminEmail(user.email) && user.role !== "admin") {
+      await updateUserRole(user.id, "admin");
+      user = { ...user, role: "admin" };
+    }
     await upsertUser({
       openId: user.openId,
-      lastSignedIn: signedInAt
+      email: user.email,
+      lastSignedIn: signedInAt,
+      role: user.role === "admin" ? "admin" : void 0
     });
     return user;
   }
@@ -1174,37 +1366,26 @@ function registerOAuthRoutes(app2) {
         res.redirect(302, "/login-required?reason=unverified");
         return;
       }
-      const userEmail = userInfo.email ?? null;
-      let isApproved = false;
-      try {
-        if (userEmail) {
-          const application = await getApprovedApplicationByEmail(userEmail);
-          isApproved = !!(application && application.status === "approved");
-        }
-      } catch (dbErr) {
-        console.error("[Google OAuth] getApprovedApplicationByEmail failed (non-fatal):", dbErr);
+      const dbReady = await getDb();
+      if (!dbReady) {
+        console.error("[Google OAuth] Database not available \u2014 check TURSO_DATABASE_URL / TURSO_AUTH_TOKEN");
       }
+      const login = await resolveGoogleLogin(userInfo);
       try {
-        await upsertUser({
-          openId: userInfo.sub,
-          name: userInfo.name || null,
-          email: userInfo.email ?? null,
-          loginMethod: "google",
-          lastSignedIn: /* @__PURE__ */ new Date(),
-          status: isApproved ? "active" : "pending"
+        await upsertUser(login.upsert);
+        console.info("[Google OAuth] User upserted", {
+          openId: userInfo.sub.slice(0, 8),
+          isApproved: login.isApproved,
+          userStatus: login.userStatus
         });
-        console.info("[Google OAuth] User upserted", { openId: userInfo.sub.slice(0, 8), isApproved });
       } catch (dbErr) {
         console.error("[Google OAuth] upsertUser failed:", dbErr);
         throw new Error(
           `Database upsert failed: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`
         );
       }
-      let redirectPath = "/app";
-      if (!isApproved) {
-        redirectPath = `/login-required?email=${encodeURIComponent(userEmail ?? "")}`;
-      }
-      const sessionToken = await sdk.createSessionToken(userInfo.sub, {
+      const redirectPath = login.redirectPath;
+      const sessionToken = await sdk.createSessionToken(login.sessionOpenId, {
         name: userInfo.name || userInfo.email || "User",
         expiresInMs: ONE_YEAR_MS
       });
@@ -1883,11 +2064,18 @@ Powered by ChatPilot`
 
 // server/routers.ts
 var COOKIE_NAME2 = "app_session_id";
-function requireAdmin(ctx) {
+async function requireAdmin(ctx) {
   const hasAdminCookie = ctx.req.cookies?.admin_session === "authenticated";
   const hasAdminRole = ctx.user?.role === "admin";
-  if (!hasAdminCookie && !hasAdminRole) {
+  const hasAdminEmail = Boolean(ctx.user?.email && isAdminEmail(ctx.user.email));
+  if (!hasAdminCookie && !hasAdminRole && !hasAdminEmail) {
     throw new TRPCError3({ code: "UNAUTHORIZED", message: "Admin access required" });
+  }
+  try {
+    await assertDatabase();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Database unavailable";
+    throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR", message });
   }
 }
 async function sendApprovalEmail2(userEmail, userName, plan) {
@@ -1936,9 +2124,42 @@ var appRouter = router({
       useCase: z2.string().optional(),
       plan: z2.enum(["bizpilot", "founderpilot", "free"]).optional().default("free")
     })).mutation(async ({ input }) => {
+      const normalizedEmail = normalizeEmail(input.email);
+      const existingUser = await getUserByEmail(normalizedEmail);
+      if (existingUser) {
+        if (existingUser.status === "active") {
+          throw new TRPCError3({
+            code: "CONFLICT",
+            message: "An account with this email already exists. Please sign in with Google."
+          });
+        }
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "Your application is already on file. Please wait for admin approval, then sign in with Google."
+        });
+      }
+      const existingApplication = await getApplicationByEmail(normalizedEmail);
+      if (existingApplication) {
+        if (existingApplication.status === "approved") {
+          throw new TRPCError3({
+            code: "CONFLICT",
+            message: "This email is already approved. Please sign in with Google."
+          });
+        }
+        if (existingApplication.status === "pending") {
+          throw new TRPCError3({
+            code: "CONFLICT",
+            message: "An application with this email is already pending review. Please wait for admin approval."
+          });
+        }
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "An application with this email was already reviewed. Contact support if you need access."
+        });
+      }
       const app2 = await createApplication({
         fullName: input.fullName,
-        email: input.email,
+        email: normalizedEmail,
         phone: input.phone,
         businessName: input.businessName,
         businessType: input.businessType,
@@ -2196,11 +2417,11 @@ Ref: ${input.transactionRef ?? "N/A"}`
     // ── System Settings ──
     settings: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         return await listSystemSettings();
       }),
       set: publicProcedure.input(z2.object({ key: z2.string(), value: z2.string() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await setSystemSetting(input.key, input.value);
         return { success: true };
       }),
@@ -2211,7 +2432,7 @@ Ref: ${input.transactionRef ?? "N/A"}`
         dataBase64: z2.string(),
         method: z2.enum(["kbzpay", "wavepay", "ayapay", "default"]).optional().default("default")
       })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const buffer = Buffer.from(input.dataBase64, "base64");
         const key = `payment-qr/${input.method}-${Date.now()}-${input.filename}`;
         const { url } = await storagePut(key, buffer, input.contentType);
@@ -2223,12 +2444,12 @@ Ref: ${input.transactionRef ?? "N/A"}`
     // ── Applications management ──
     applications: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const apps = await listAllApplications();
         return { applications: apps };
       }),
       approve: publicProcedure.input(z2.object({ applicationId: z2.number(), notes: z2.string().optional() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const app2 = await getApplicationById(input.applicationId);
         if (!app2) throw new TRPCError3({ code: "NOT_FOUND" });
         const { nanoid: nanoid2 } = await import("nanoid");
@@ -2261,7 +2482,7 @@ Ref: ${input.transactionRef ?? "N/A"}`
         return { success: true, userId: user.id, openId };
       }),
       reject: publicProcedure.input(z2.object({ applicationId: z2.number(), notes: z2.string().optional() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await updateApplicationStatus(input.applicationId, "rejected", void 0, input.notes);
         return { success: true };
       })
@@ -2269,22 +2490,22 @@ Ref: ${input.transactionRef ?? "N/A"}`
     // ── User management ──
     users: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const users2 = await listAllUsers();
         return { users: users2 };
       }),
       updateRole: publicProcedure.input(z2.object({ userId: z2.number(), role: z2.enum(["user", "admin"]) })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await updateUserRole(input.userId, input.role);
         return { success: true };
       }),
       updateSubscription: publicProcedure.input(z2.object({ userId: z2.number(), plan: z2.string(), status: z2.string() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await updateUserSubscription(input.userId, input.plan, input.status);
         return { success: true };
       }),
       generate: publicProcedure.input(z2.object({ name: z2.string().min(1), email: z2.string().email(), plan: z2.enum(["bizpilot", "founderpilot"]).optional(), businessName: z2.string().optional() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const { nanoid: nanoid2 } = await import("nanoid");
         const openId = `ext_${nanoid2(16)}`;
         const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$";
@@ -2296,7 +2517,7 @@ Ref: ${input.transactionRef ?? "N/A"}`
         return { success: true, userId: user.id, openId, name: input.name, email: input.email, plan: input.plan || null, generatedPassword };
       }),
       delete: publicProcedure.input(z2.object({ userId: z2.number() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await deleteUser(input.userId);
         return { success: true };
       })
@@ -2304,12 +2525,12 @@ Ref: ${input.transactionRef ?? "N/A"}`
     // ── Payment management ──
     payments: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const payments2 = await listAllPayments();
         return { payments: payments2 };
       }),
       updateStatus: publicProcedure.input(z2.object({ paymentId: z2.number(), status: z2.enum(["pending", "confirmed", "rejected"]) })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await updatePaymentStatus(input.paymentId, input.status);
         if (input.status === "confirmed") {
           const allPayments = await listAllPayments();
@@ -2353,7 +2574,7 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         transactionRef: z2.string().optional(),
         notes: z2.string().optional()
       })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const { paymentId, ...fields } = input;
         await updatePayment(paymentId, fields);
         if (fields.status === "confirmed" || fields.plan) {
@@ -2370,7 +2591,7 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         return { success: true };
       }),
       delete: publicProcedure.input(z2.object({ paymentId: z2.number() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await deletePayment(input.paymentId);
         return { success: true };
       })
@@ -2378,22 +2599,22 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
     // ── System Prompt management ──
     prompts: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const prompts = await listSystemPrompts();
         return { prompts };
       }),
       getActive: publicProcedure.input(z2.object({ modelSlug: z2.enum(["bizpilot", "founderpilot"]) })).query(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const content = await getActiveSystemPrompt(input.modelSlug);
         return { content };
       }),
       save: publicProcedure.input(z2.object({ name: z2.string().min(1), modelSlug: z2.enum(["bizpilot", "founderpilot"]), content: z2.string().min(10), activate: z2.boolean().default(false) })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const result = await createSystemPromptVersion({ name: input.name, modelSlug: input.modelSlug, content: input.content, activate: input.activate });
         return { success: true, promptId: result.id };
       }),
       activate: publicProcedure.input(z2.object({ promptId: z2.number(), modelSlug: z2.string() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await activateSystemPrompt(input.promptId, input.modelSlug);
         return { success: true };
       })
@@ -2401,22 +2622,22 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
     // ── API Key management ──
     apiKeys: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const keys = await listAllApiKeys();
         return { keys };
       }),
       upsert: publicProcedure.input(z2.object({ provider: z2.enum(["openai", "gemini"]), keyValue: z2.string().min(10) })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await upsertApiKey(input.provider, input.keyValue);
         return { success: true };
       }),
       setActive: publicProcedure.input(z2.object({ keyId: z2.number(), provider: z2.string() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await setApiKeyActive(input.keyId, input.provider);
         return { success: true };
       }),
       delete: publicProcedure.input(z2.object({ keyId: z2.number() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await deleteApiKey(input.keyId);
         return { success: true };
       })
@@ -2424,12 +2645,12 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
     // ── AI Model management ──
     models: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const models = await listAllAiModels();
         return { models };
       }),
       update: publicProcedure.input(z2.object({ targetRole: z2.enum(["bizpilot", "founderpilot"]), modelString: z2.string().min(1) })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await updateAiModel(input.targetRole, input.modelString);
         return { success: true };
       })
@@ -2437,7 +2658,7 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
     // ── Announcements management ──
     announcements: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const items = await listAnnouncements(false);
         return { announcements: items };
       }),
@@ -2446,17 +2667,17 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         content: z2.string().min(1),
         type: z2.enum(["info", "success", "warning", "urgent"]).default("info")
       })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const result = await createAnnouncement(input);
         return { success: true, id: result.id };
       }),
       toggle: publicProcedure.input(z2.object({ id: z2.number(), isActive: z2.enum(["true", "false"]) })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await updateAnnouncement(input.id, { isActive: input.isActive });
         return { success: true };
       }),
       delete: publicProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await deleteAnnouncement(input.id);
         return { success: true };
       })
@@ -2464,18 +2685,18 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
     // ── External API Token management ──
     externalTokens: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         return await listExternalApiTokens();
       }),
       create: publicProcedure.input(z2.object({ name: z2.string().min(1) })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const { nanoid: nanoid2 } = await import("nanoid");
         const token = `ph_ext_${nanoid2(32)}`;
         const result = await createExternalApiToken(input.name, token);
         return { success: true, id: result.id, token };
       }),
       delete: publicProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ ctx, input }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         await deleteExternalApiToken(input.id);
         return { success: true };
       })

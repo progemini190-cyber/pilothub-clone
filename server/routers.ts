@@ -8,15 +8,25 @@ import { invokeAdvisorLLM } from "./llmWithApiKey";
 import { notifyOwner } from "./_core/notification";
 import { storagePut } from "./storage";
 import { sendApprovalEmail as sendApprovalEmailHelper, sendPaymentConfirmationEmail } from "./emailHelper";
+import { isAdminEmail } from "./_core/adminAccess";
 
 const COOKIE_NAME = "app_session_id";
 
-function requireAdmin(ctx: { req: { cookies?: Record<string, string> }; user?: { role?: string } | null }) {
-  // Accept either: legacy admin_session cookie OR logged-in user with role='admin'
+async function requireAdmin(ctx: {
+  req: { cookies?: Record<string, string> };
+  user?: { role?: string; email?: string | null } | null;
+}) {
   const hasAdminCookie = ctx.req.cookies?.admin_session === "authenticated";
   const hasAdminRole = ctx.user?.role === "admin";
-  if (!hasAdminCookie && !hasAdminRole) {
+  const hasAdminEmail = Boolean(ctx.user?.email && isAdminEmail(ctx.user.email));
+  if (!hasAdminCookie && !hasAdminRole && !hasAdminEmail) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Admin access required" });
+  }
+  try {
+    await db.assertDatabase();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Database unavailable";
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
   }
 }
 
@@ -389,13 +399,13 @@ export const appRouter = router({
     // ── System Settings ──
     settings: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         return await db.listSystemSettings();
       }),
       set: publicProcedure
         .input(z.object({ key: z.string(), value: z.string() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.setSystemSetting(input.key, input.value);
           return { success: true };
         }),
@@ -408,7 +418,7 @@ export const appRouter = router({
           method: z.enum(["kbzpay", "wavepay", "ayapay", "default"]).optional().default("default"),
         }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           const buffer = Buffer.from(input.dataBase64, "base64");
           const key = `payment-qr/${input.method}-${Date.now()}-${input.filename}`;
           const { url } = await storagePut(key, buffer, input.contentType);
@@ -421,14 +431,14 @@ export const appRouter = router({
     // ── Applications management ──
     applications: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const apps = await db.listAllApplications();
         return { applications: apps };
       }),
       approve: publicProcedure
         .input(z.object({ applicationId: z.number(), notes: z.string().optional() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           const app = await db.getApplicationById(input.applicationId);
           if (!app) throw new TRPCError({ code: "NOT_FOUND" });
           // Create user account for this applicant
@@ -466,7 +476,7 @@ export const appRouter = router({
       reject: publicProcedure
         .input(z.object({ applicationId: z.number(), notes: z.string().optional() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.updateApplicationStatus(input.applicationId, "rejected", undefined, input.notes);
           return { success: true };
         }),
@@ -475,28 +485,28 @@ export const appRouter = router({
     // ── User management ──
     users: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const users = await db.listAllUsers();
         return { users };
       }),
       updateRole: publicProcedure
         .input(z.object({ userId: z.number(), role: z.enum(["user", "admin"]) }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.updateUserRole(input.userId, input.role);
           return { success: true };
         }),
       updateSubscription: publicProcedure
         .input(z.object({ userId: z.number(), plan: z.string(), status: z.string() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.updateUserSubscription(input.userId, input.plan, input.status);
           return { success: true };
         }),
       generate: publicProcedure
         .input(z.object({ name: z.string().min(1), email: z.string().email(), plan: z.enum(["bizpilot", "founderpilot"]).optional(), businessName: z.string().optional() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           const { nanoid } = await import("nanoid");
           const openId = `ext_${nanoid(16)}`;
           const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$";
@@ -510,7 +520,7 @@ export const appRouter = router({
       delete: publicProcedure
         .input(z.object({ userId: z.number() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.deleteUser(input.userId);
           return { success: true };
         }),
@@ -519,14 +529,14 @@ export const appRouter = router({
     // ── Payment management ──
     payments: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const payments = await db.listAllPayments();
         return { payments };
       }),
       updateStatus: publicProcedure
         .input(z.object({ paymentId: z.number(), status: z.enum(["pending", "confirmed", "rejected"]) }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.updatePaymentStatus(input.paymentId, input.status);
           if (input.status === "confirmed") {
             const allPayments = await db.listAllPayments();
@@ -572,7 +582,7 @@ export const appRouter = router({
           notes: z.string().optional(),
         }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           const { paymentId, ...fields } = input;
           await db.updatePayment(paymentId, fields);
           if (fields.status === "confirmed" || fields.plan) {
@@ -591,7 +601,7 @@ export const appRouter = router({
       delete: publicProcedure
         .input(z.object({ paymentId: z.number() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.deletePayment(input.paymentId);
           return { success: true };
         }),
@@ -600,28 +610,28 @@ export const appRouter = router({
     // ── System Prompt management ──
     prompts: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const prompts = await db.listSystemPrompts();
         return { prompts };
       }),
       getActive: publicProcedure
         .input(z.object({ modelSlug: z.enum(["bizpilot", "founderpilot"]) }))
         .query(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           const content = await db.getActiveSystemPrompt(input.modelSlug);
           return { content };
         }),
       save: publicProcedure
         .input(z.object({ name: z.string().min(1), modelSlug: z.enum(["bizpilot", "founderpilot"]), content: z.string().min(10), activate: z.boolean().default(false) }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           const result = await db.createSystemPromptVersion({ name: input.name, modelSlug: input.modelSlug, content: input.content, activate: input.activate });
           return { success: true, promptId: result.id };
         }),
       activate: publicProcedure
         .input(z.object({ promptId: z.number(), modelSlug: z.string() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.activateSystemPrompt(input.promptId, input.modelSlug);
           return { success: true };
         }),
@@ -630,28 +640,28 @@ export const appRouter = router({
     // ── API Key management ──
     apiKeys: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const keys = await db.listAllApiKeys();
         return { keys };
       }),
       upsert: publicProcedure
         .input(z.object({ provider: z.enum(["openai", "gemini"]), keyValue: z.string().min(10) }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.upsertApiKey(input.provider, input.keyValue);
           return { success: true };
         }),
       setActive: publicProcedure
         .input(z.object({ keyId: z.number(), provider: z.string() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.setApiKeyActive(input.keyId, input.provider);
           return { success: true };
         }),
       delete: publicProcedure
         .input(z.object({ keyId: z.number() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.deleteApiKey(input.keyId);
           return { success: true };
         }),
@@ -660,14 +670,14 @@ export const appRouter = router({
     // ── AI Model management ──
     models: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const models = await db.listAllAiModels();
         return { models };
       }),
       update: publicProcedure
         .input(z.object({ targetRole: z.enum(["bizpilot", "founderpilot"]), modelString: z.string().min(1) }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.updateAiModel(input.targetRole, input.modelString);
           return { success: true };
         }),
@@ -676,7 +686,7 @@ export const appRouter = router({
     // ── Announcements management ──
     announcements: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         const items = await db.listAnnouncements(false);
         return { announcements: items };
       }),
@@ -687,21 +697,21 @@ export const appRouter = router({
           type: z.enum(["info", "success", "warning", "urgent"]).default("info"),
         }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           const result = await db.createAnnouncement(input);
           return { success: true, id: result.id };
         }),
       toggle: publicProcedure
         .input(z.object({ id: z.number(), isActive: z.enum(["true", "false"]) }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.updateAnnouncement(input.id, { isActive: input.isActive });
           return { success: true };
         }),
       delete: publicProcedure
         .input(z.object({ id: z.number() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.deleteAnnouncement(input.id);
           return { success: true };
         }),
@@ -710,13 +720,13 @@ export const appRouter = router({
     // ── External API Token management ──
     externalTokens: router({
       list: publicProcedure.query(async ({ ctx }) => {
-        requireAdmin(ctx);
+        await requireAdmin(ctx);
         return await db.listExternalApiTokens();
       }),
       create: publicProcedure
         .input(z.object({ name: z.string().min(1) }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           const { nanoid } = await import("nanoid");
           const token = `ph_ext_${nanoid(32)}`;
           const result = await db.createExternalApiToken(input.name, token);
@@ -725,7 +735,7 @@ export const appRouter = router({
       delete: publicProcedure
         .input(z.object({ id: z.number() }))
         .mutation(async ({ ctx, input }) => {
-          requireAdmin(ctx);
+          await requireAdmin(ctx);
           await db.deleteExternalApiToken(input.id);
           return { success: true };
         }),

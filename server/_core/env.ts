@@ -22,4 +22,7 @@ export const ENV = {
    * Legacy: OWNER_OPEN_ID (Manus openId) is still read for one release if unset.
    */
   ownerGoogleSub: process.env.GOOGLE_OWNER_SUB ?? process.env.OWNER_OPEN_ID ?? "",
+
+  /** Comma-separated emails auto-promoted to admin on Google login (see adminAccess.ts). */
+  adminEmail: process.env.ADMIN_EMAIL ?? "",
 };
