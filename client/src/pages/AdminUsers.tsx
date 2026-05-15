@@ -83,7 +83,8 @@ export default function AdminUsers() {
 
   const copyCredentials = () => {
     if (!generatedUser) return;
-    const text = `PilotHub Account\nName: ${generatedUser.name}\nEmail: ${generatedUser.email}\nPassword: ${generatedUser.generatedPassword}\nPlan: ${generatedUser.plan || "None"}\nLogin: https://pilothub-5a5u5kwk.manus.space`;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const text = `PilotHub Account\nName: ${generatedUser.name}\nEmail: ${generatedUser.email}\nPassword: ${generatedUser.generatedPassword}\nPlan: ${generatedUser.plan || "None"}\nLogin: ${origin || "(your site URL)"}`;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -324,7 +325,7 @@ export default function AdminUsers() {
 
                 <div className="p-3 rounded-xl text-xs"
                   style={{ background: "oklch(55% 0.14 75 / 0.1)", border: "1px solid oklch(55% 0.14 75 / 0.25)", color: "oklch(78% 0.12 75)" }}>
-                  ⚠ User can log in via Manus OAuth using their email. Share the password for their reference.
+                  ⚠ User signs in with Google (Continue with Google). Share the generated password only if you use a separate password flow for them.
                 </div>
 
                 <div className="flex gap-3">

@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Menu, X, LogIn } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { getLoginUrl } from "@/const";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 export default function Home() {
@@ -52,12 +52,7 @@ export default function Home() {
                 Dashboard
               </button>
             ) : (
-              <button onClick={() => window.location.href = getLoginUrl()}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition hover:opacity-90"
-                style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
-                <LogIn className="w-4 h-4" />
-                Login
-              </button>
+              <GoogleSignInButton size="compact" className="!shadow-none" />
             )}
           </div>
 
@@ -69,12 +64,7 @@ export default function Home() {
                 Dashboard
               </button>
             ) : (
-              <button onClick={() => window.location.href = getLoginUrl()}
-                className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-                style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
-                <LogIn className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Login</span>
-              </button>
+              <GoogleSignInButton size="compact" className="!px-2.5 !py-1.5 !text-xs !shadow-none" />
             )}
             <button
               type="button"
@@ -149,12 +139,9 @@ export default function Home() {
                 </button>
               ) : (
                 <>
-                  <button onClick={() => window.location.href = getLoginUrl()}
-                    className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition w-full sm:w-auto"
-                    style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)", boxShadow: "0 0 20px oklch(72% 0.18 162 / 0.4)" }}>
-                    <LogIn className="w-4 h-4" />
-                    Google ဖြင့် Login ဝင်ပါ
-                  </button>
+                  <GoogleSignInButton
+                    className="w-full sm:w-auto !shadow-md"
+                  />
                   <button onClick={() => setLocation("/apply")}
                     className="px-5 py-2.5 rounded-xl font-semibold text-sm transition w-full sm:w-auto text-center"
                     style={{ background: "transparent", color: "white", border: "1px solid oklch(40% 0.05 220)" }}>

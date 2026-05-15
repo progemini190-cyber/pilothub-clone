@@ -1,4 +1,3 @@
-import { ENV } from "./_core/env";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure, approvedProcedure } from "./_core/trpc";
@@ -21,7 +20,7 @@ function requireAdmin(ctx: { req: { cookies?: Record<string, string> }; user?: {
   }
 }
 
-// ── Email helper (uses Manus notification + owner email) ──
+// ── Email helper (Gmail SMTP + optional owner notification) ──
 async function sendApprovalEmail(userEmail: string, userName: string, plan: string) {
   // Try to send email via Gmail SMTP
   const loginUrl = "https://pilothub.vip";

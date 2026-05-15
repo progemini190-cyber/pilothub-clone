@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { Check, Zap, Star, Crown, Lock, Menu, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
@@ -80,11 +81,7 @@ export default function Pricing() {
               Dashboard
             </button>
           ) : (
-            <button type="button" onClick={() => window.location.href = getLoginUrl()}
-              className="px-4 py-2 rounded-lg text-sm font-semibold"
-              style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
-              Login
-            </button>
+            <GoogleSignInButton size="compact" className="!shadow-none" />
           )}
         </div>
         <div className="flex md:hidden items-center gap-2 flex-shrink-0">
@@ -95,11 +92,7 @@ export default function Pricing() {
               Dashboard
             </button>
           ) : (
-            <button type="button" onClick={() => window.location.href = getLoginUrl()}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-              style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
-              Login
-            </button>
+            <GoogleSignInButton size="compact" className="!px-2.5 !py-1.5 !text-xs !shadow-none" />
           )}
           <button
             type="button"

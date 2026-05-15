@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-const BASE_URL = typeof window !== "undefined" ? window.location.origin : "https://pilothub-5a5u5kwk.manus.space";
+const BASE_URL = typeof window !== "undefined" ? window.location.origin : "";
 
 const ENDPOINTS = [
   {
