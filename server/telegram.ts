@@ -37,7 +37,7 @@ const ALREADY_LINKED_MSG =
 const CONTACT_TEAM_BUTTON_TEXT = "📞 ChatPilot Team သို့ ဆက်သွယ်ရန်";
 
 const CONTACT_TEAM_REPLY_MSG =
-  "ChatPilot Team သို့ ဆက်သွယ်ရန် အောက်ပါ Link သို့ ဝင်ရောက်ပါ 👇\n\nhttps://t.me/YOUR_SALE_AGENT_LINK";
+  "ChatPilot Team သို့ ဆက်သွယ်ရန် အောက်ပါ Link သို့ ဝင်ရောက်ပါ 👇\n\nhttps://t.me/chatpilot_ai_bot";
 
 /**
  * Shown under the text input on every bot reply.
@@ -123,6 +123,27 @@ async function sendTelegramMessage(
   }
 }
 
+/** Shows “typing…” while waiting for Gemini. */
+async function sendTypingChatAction(
+  botToken: string,
+  chatId: string | number,
+): Promise<void> {
+  try {
+    const url = `https://api.telegram.org/bot${botToken}/sendChatAction`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn("[Telegram] sendChatAction typing failed:", response.status, body);
+    }
+  } catch (err) {
+    console.warn("[Telegram] sendChatAction error:", err);
+  }
+}
+
 async function handleStartLink(
   chatId: string,
   token: string,
@@ -200,6 +221,8 @@ async function handleChatMessage(
     { role: "system", content: (systemPrompt || fallback) + profileCtx },
     { role: "user", content: userText },
   ];
+
+  await sendTypingChatAction(botToken, chatId);
 
   let reply: string;
   try {
