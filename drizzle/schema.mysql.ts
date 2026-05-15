@@ -159,5 +159,14 @@ export const botActivationTokens = mysqlTable("bot_activation_tokens", {
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 });
 
+export const telegramLlmTurns = mysqlTable("telegram_llm_turns", {
+  id: int("id").primaryKey().autoincrement(),
+  userId: int("userId").notNull(),
+  advisor: varchar("advisor", { length: 32 }).notNull(),
+  role: varchar("role", { length: 16 }).notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;

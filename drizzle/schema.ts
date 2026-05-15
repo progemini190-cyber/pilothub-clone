@@ -210,3 +210,16 @@ export const botActivationTokens = sqliteTable("bot_activation_tokens", {
 
 export type BotActivationToken = typeof botActivationTokens.$inferSelect;
 export type InsertBotActivationToken = typeof botActivationTokens.$inferInsert;
+
+/** Telegram ↔ Gemini short-term memory (per user + advisor channel). */
+export const telegramLlmTurns = sqliteTable("telegram_llm_turns", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("userId").notNull(),
+  advisor: text("advisor", { length: 32 }).notNull(),
+  role: text("role", { length: 16 }).notNull(),
+  content: text("content").notNull(),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
+});
+
+export type TelegramLlmTurn = typeof telegramLlmTurns.$inferSelect;
+export type InsertTelegramLlmTurn = typeof telegramLlmTurns.$inferInsert;

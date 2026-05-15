@@ -62,6 +62,13 @@ describe("hasTelegramCredits", () => {
     ).toBe(false);
   });
 
+  it("treats unix seconds timestamps as ms when value is small enough", () => {
+    const futureSec = Math.floor(Date.now() / 1000) + 86400 * 365;
+    expect(isTelegramPlanActive(futureSec)).toBe(true);
+    const pastSec = Math.floor(Date.now() / 1000) - 86400;
+    expect(isTelegramPlanActive(pastSec)).toBe(false);
+  });
+
   it("allows when plan expiry is in the future", () => {
     const nextMonth = new Date(Date.now() + 30 * 86400000);
     expect(isTelegramPlanActive(nextMonth)).toBe(true);

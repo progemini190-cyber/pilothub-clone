@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, sql } from "drizzle-orm";
+import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
 import type { InsertUser } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { shouldGrantAdminRole } from "./_core/adminAccess";
@@ -22,6 +22,7 @@ import {
   externalApiTokens,
   announcements,
   botActivationTokens,
+  telegramLlmTurns,
 } from "./db/connection";
 
 export {
@@ -807,6 +808,7 @@ export async function getUserByTelegramChatId(chatId: string) {
     .select()
     .from(users)
     .where(eq(users.telegramChatId, chatId))
+    .orderBy(desc(users.updatedAt))
     .limit(1);
   return result[0];
 }
@@ -814,6 +816,7 @@ export async function getUserByTelegramChatId(chatId: string) {
 export async function linkTelegramChat(userId: number, chatId: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+  await db.update(users).set({ telegramChatId: null }).where(eq(users.telegramChatId, chatId));
   await db.update(users).set({ telegramChatId: chatId }).where(eq(users.id, userId));
 }
 
@@ -872,15 +875,27 @@ export function coerceTelegramMessageLimit(value: unknown): number {
 }
 
 /**
- * Plan is active when expiry is null/unset, OR expiry is strictly in the future.
+ * Plan is active when expiry is null/unset, invalid, or strictly in the future.
+ * Handles legacy rows where unix **seconds** were stored instead of ms.
  */
 export function isTelegramPlanActive(
   planExpiryDate: Date | string | number | null | undefined,
 ): boolean {
-  if (planExpiryDate == null) return true;
-  const expiry = new Date(planExpiryDate);
-  if (Number.isNaN(expiry.getTime())) return true;
-  return expiry.getTime() > Date.now();
+  if (planExpiryDate == null || planExpiryDate === "") return true;
+
+  let ms: number;
+  if (planExpiryDate instanceof Date) {
+    ms = planExpiryDate.getTime();
+  } else if (typeof planExpiryDate === "number") {
+    ms = planExpiryDate;
+  } else {
+    const n = Number(planExpiryDate);
+    ms = Number.isFinite(n) ? n : NaN;
+  }
+
+  if (!Number.isFinite(ms)) return true;
+  if (ms > 0 && ms < 1e12) ms *= 1000;
+  return ms > Date.now();
 }
 
 /** Telegram access: advisor limit > 0 and plan not expired. */
@@ -898,6 +913,86 @@ export function hasTelegramCredits(
       ? coerceTelegramMessageLimit(user.bizMessageLimit)
       : coerceTelegramMessageLimit(user.founderMessageLimit);
   return limit > 0;
+}
+
+/** Max stored messages (user + assistant); ~20 full exchanges for paid Telegram packs. */
+const MAX_TELEGRAM_LLM_TURNS = 40;
+
+const MAX_TELEGRAM_TURN_CHARS = 12000;
+
+function clipTelegramTurnContent(text: string): string {
+  if (text.length <= MAX_TELEGRAM_TURN_CHARS) return text;
+  return `${text.slice(0, MAX_TELEGRAM_TURN_CHARS)}\n…`;
+}
+
+export async function listRecentTelegramLlmTurnsForAdvisor(
+  userId: number,
+  advisor: AdvisorSlug,
+  maxMessages: number,
+): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const cap = Math.min(Math.max(1, maxMessages), MAX_TELEGRAM_LLM_TURNS);
+  const rows = await db
+    .select({
+      role: telegramLlmTurns.role,
+      content: telegramLlmTurns.content,
+    })
+    .from(telegramLlmTurns)
+    .where(and(eq(telegramLlmTurns.userId, userId), eq(telegramLlmTurns.advisor, advisor)))
+    .orderBy(desc(telegramLlmTurns.createdAt))
+    .limit(cap);
+
+  return rows
+    .reverse()
+    .filter((r) => r.role === "user" || r.role === "assistant")
+    .map((r) => ({
+      role: r.role as "user" | "assistant",
+      content: r.content,
+    }));
+}
+
+export async function appendTelegramLlmTurnPair(
+  userId: number,
+  advisor: AdvisorSlug,
+  userContent: string,
+  assistantContent: string,
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  const now = new Date();
+  await db.insert(telegramLlmTurns).values([
+    {
+      userId,
+      advisor,
+      role: "user",
+      content: clipTelegramTurnContent(userContent),
+      createdAt: now,
+    },
+    {
+      userId,
+      advisor,
+      role: "assistant",
+      content: clipTelegramTurnContent(assistantContent),
+      createdAt: now,
+    },
+  ]);
+
+  const ids = await db
+    .select({ id: telegramLlmTurns.id })
+    .from(telegramLlmTurns)
+    .where(and(eq(telegramLlmTurns.userId, userId), eq(telegramLlmTurns.advisor, advisor)))
+    .orderBy(desc(telegramLlmTurns.createdAt));
+
+  const toDrop = ids.slice(MAX_TELEGRAM_LLM_TURNS);
+  if (toDrop.length === 0) return;
+  await db.delete(telegramLlmTurns).where(
+    inArray(
+      telegramLlmTurns.id,
+      toDrop.map((r) => r.id),
+    ),
+  );
 }
 
 export type TelegramAdminUserRow = {

@@ -30,6 +30,7 @@ export let messages = sqliteSchema.messages;
 export let externalApiTokens = sqliteSchema.externalApiTokens;
 export let announcements = sqliteSchema.announcements;
 export let botActivationTokens = sqliteSchema.botActivationTokens;
+export let telegramLlmTurns = sqliteSchema.telegramLlmTurns;
 
 function applySchema(provider: DatabaseProvider) {
   if (provider === "mysql") {
@@ -45,6 +46,7 @@ function applySchema(provider: DatabaseProvider) {
     externalApiTokens = mysqlSchema.externalApiTokens;
     announcements = mysqlSchema.announcements;
     botActivationTokens = mysqlSchema.botActivationTokens;
+    telegramLlmTurns = mysqlSchema.telegramLlmTurns;
   } else {
     users = sqliteSchema.users;
     payments = sqliteSchema.payments;
@@ -58,6 +60,7 @@ function applySchema(provider: DatabaseProvider) {
     externalApiTokens = sqliteSchema.externalApiTokens;
     announcements = sqliteSchema.announcements;
     botActivationTokens = sqliteSchema.botActivationTokens;
+    telegramLlmTurns = sqliteSchema.telegramLlmTurns;
   }
 }
 

@@ -213,13 +213,11 @@ async function handleChatMessage(
     return;
   }
 
-  const isBiz = !advisorQuery || advisorQuery.toLowerCase().includes("biz");
-  const currentLimit = isBiz
-    ? Number(user.bizMessageLimit) || 0
-    : Number(user.founderMessageLimit) || 0;
-  const isExpired = user.planExpiryDate
-    ? new Date(user.planExpiryDate) < new Date()
-    : false;
+  const isBiz = advisorSlug === "bizpilot";
+  const currentLimit = db.coerceTelegramMessageLimit(
+    isBiz ? user.bizMessageLimit : user.founderMessageLimit,
+  );
+  const isExpired = !db.isTelegramPlanActive(user.planExpiryDate ?? null);
 
   console.log("Credit check:", {
     userId: user.id,
@@ -262,8 +260,11 @@ async function handleChatMessage(
     .filter(Boolean)
     .join("\n");
 
+  const history = await db.listRecentTelegramLlmTurnsForAdvisor(user.id, advisorSlug, 40);
+
   const llmMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: (systemPrompt || fallback) + profileCtx },
+    ...history.map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: userText },
   ];
 
@@ -288,11 +289,12 @@ async function handleChatMessage(
     return;
   }
 
-  const advisorForDecrement: AdvisorSlug = isBiz ? "bizpilot" : "founderpilot";
-  await db.decrementTelegramMessageLimit(user.id, advisorForDecrement);
+  await db.appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+
+  await db.decrementTelegramMessageLimit(user.id, advisorSlug);
   console.log("[Telegram] Message limit decremented after successful delivery", {
     userId: user.id,
-    advisorForDecrement,
+    advisorSlug,
     isBiz,
   });
 }
