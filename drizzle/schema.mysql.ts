@@ -36,6 +36,7 @@ export const users = mysqlTable("users", {
   founderMessagesUsed: int("founderMessagesUsed").default(0).notNull(),
   hasUsedBizStarter: mysqlEnum("hasUsedBizStarter", ["true", "false"]).notNull().default("false"),
   hasUsedFounderStarter: mysqlEnum("hasUsedFounderStarter", ["true", "false"]).notNull().default("false"),
+  telegramChatId: varchar("telegramChatId", { length: 64 }),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
   lastSignedIn: timestamp("lastSignedIn").notNull().defaultNow(),
@@ -147,6 +148,14 @@ export const announcements = mysqlTable("announcements", {
   isActive: mysqlEnum("isActive", ["true", "false"]).default("true").notNull(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
+});
+
+export const botActivationTokens = mysqlTable("bot_activation_tokens", {
+  id: int("id").primaryKey().autoincrement(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  isUsed: mysqlEnum("isUsed", ["true", "false"]).notNull().default("false"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
 });
 
 export type User = typeof users.$inferSelect;

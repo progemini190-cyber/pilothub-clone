@@ -29,6 +29,7 @@ export let conversations = sqliteSchema.conversations;
 export let messages = sqliteSchema.messages;
 export let externalApiTokens = sqliteSchema.externalApiTokens;
 export let announcements = sqliteSchema.announcements;
+export let botActivationTokens = sqliteSchema.botActivationTokens;
 
 function applySchema(provider: DatabaseProvider) {
   if (provider === "mysql") {
@@ -43,6 +44,7 @@ function applySchema(provider: DatabaseProvider) {
     messages = mysqlSchema.messages;
     externalApiTokens = mysqlSchema.externalApiTokens;
     announcements = mysqlSchema.announcements;
+    botActivationTokens = mysqlSchema.botActivationTokens;
   } else {
     users = sqliteSchema.users;
     payments = sqliteSchema.payments;
@@ -55,6 +57,7 @@ function applySchema(provider: DatabaseProvider) {
     messages = sqliteSchema.messages;
     externalApiTokens = sqliteSchema.externalApiTokens;
     announcements = sqliteSchema.announcements;
+    botActivationTokens = sqliteSchema.botActivationTokens;
   }
 }
 

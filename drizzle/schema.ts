@@ -26,6 +26,7 @@ export const users = sqliteTable("users", {
   founderMessagesUsed: integer("founderMessagesUsed").default(0).notNull(),
   hasUsedBizStarter: text("hasUsedBizStarter", { enum: ["true", "false"] }).notNull().default("false"),
   hasUsedFounderStarter: text("hasUsedFounderStarter", { enum: ["true", "false"] }).notNull().default("false"),
+  telegramChatId: text("telegramChatId", { length: 64 }),
   createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
     .notNull()
@@ -197,3 +198,14 @@ export const announcements = sqliteTable("announcements", {
 });
 export type Announcement = typeof announcements.$inferSelect;
 export type InsertAnnouncement = typeof announcements.$inferInsert;
+
+export const botActivationTokens = sqliteTable("bot_activation_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  token: text("token", { length: 64 }).notNull().unique(),
+  userId: integer("userId").notNull(),
+  isUsed: text("isUsed", { enum: ["true", "false"] }).notNull().default("false"),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
+});
+
+export type BotActivationToken = typeof botActivationTokens.$inferSelect;
+export type InsertBotActivationToken = typeof botActivationTokens.$inferInsert;

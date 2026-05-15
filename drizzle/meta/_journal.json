@@ -8,6 +8,13 @@
       "when": 1778773148272,
       "tag": "0000_turso_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779000000000,
+      "tag": "0001_telegram_bots",
+      "breakpoints": true
     }
   ]
 }

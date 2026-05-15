@@ -15,6 +15,7 @@ import type { Express, Request, Response } from "express";
 import * as db from "./db";
 import { nanoid } from "nanoid";
 import { notifyOwner } from "./_core/notification";
+import { generateTelegramActivationToken } from "./telegram";
 
 // ── API Key auth ──────────────────────────────────────────────────────────────
 function getPublicApiKey(): string {
@@ -75,6 +76,7 @@ export function registerPublicApiRoutes(app: Express) {
         { method: "GET",  path: "/api/public/users/list", auth: "X-API-Key (admin)", description: "List all users" },
         { method: "POST", path: "/api/public/payments/submit", auth: "X-API-Key (public)", description: "Submit a payment" },
         { method: "GET",  path: "/api/public/payments/list", auth: "X-API-Key (admin)", description: "List all payments" },
+        { method: "POST", path: "/api/admin/telegram/token", auth: "X-API-Key (admin)", description: "Generate Telegram bot activation token for a user" },
       ],
     });
   });
@@ -239,6 +241,24 @@ export function registerPublicApiRoutes(app: Express) {
     } catch (err: unknown) {
       console.error("[PublicAPI] /payments/submit error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  });
+
+  // ── POST /api/admin/telegram/token ────────────────────────────────────────
+  app.post("/api/admin/telegram/token", async (req: Request, res: Response) => {
+    if (!await requireApiKey(req, res, true)) return;
+    try {
+      const { userId } = req.body as { userId?: number };
+      if (!userId || typeof userId !== "number") {
+        res.status(400).json({ success: false, error: "userId (number) is required" });
+        return;
+      }
+      const result = await generateTelegramActivationToken(userId);
+      res.json({ success: true, ...result });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Internal server error";
+      console.error("[PublicAPI] /admin/telegram/token error:", err);
+      res.status(400).json({ success: false, error: message });
     }
   });
 

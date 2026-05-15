@@ -5,6 +5,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import * as db from "./db";
 import { invokeAdvisorLLM } from "./llmWithApiKey";
+import { generateTelegramActivationToken } from "./telegram";
 import { notifyOwner } from "./_core/notification";
 import { storagePut } from "./storage";
 import { sendApprovalEmail as sendApprovalEmailHelper, sendPaymentConfirmationEmail } from "./emailHelper";
@@ -523,6 +524,17 @@ export const appRouter = router({
           await requireAdmin(ctx);
           await db.deleteUser(input.userId);
           return { success: true };
+        }),
+      generateTelegramToken: publicProcedure
+        .input(z.object({ userId: z.number() }))
+        .mutation(async ({ ctx, input }) => {
+          await requireAdmin(ctx);
+          try {
+            return await generateTelegramActivationToken(input.userId);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to generate token";
+            throw new TRPCError({ code: "BAD_REQUEST", message });
+          }
         }),
     }),
 

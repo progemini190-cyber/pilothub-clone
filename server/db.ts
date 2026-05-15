@@ -21,6 +21,7 @@ import {
   applications,
   externalApiTokens,
   announcements,
+  botActivationTokens,
 } from "./db/connection";
 
 export {
@@ -793,4 +794,91 @@ export async function deleteAnnouncement(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.delete(announcements).where(eq(announcements.id, id));
+}
+
+// ── Telegram bot helpers ──
+
+export type AdvisorSlug = "bizpilot" | "founderpilot";
+
+export async function getUserByTelegramChatId(chatId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.telegramChatId, chatId))
+    .limit(1);
+  return result[0];
+}
+
+export async function linkTelegramChat(userId: number, chatId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ telegramChatId: chatId }).where(eq(users.id, userId));
+}
+
+export async function getActivationToken(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db
+    .select()
+    .from(botActivationTokens)
+    .where(eq(botActivationTokens.token, token))
+    .limit(1);
+  return result[0];
+}
+
+export async function createBotActivationToken(userId: number, token: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const user = await getUserById(userId);
+  if (!user) throw new Error("User not found");
+  const [row] = await db
+    .insert(botActivationTokens)
+    .values({ token, userId, isUsed: "false" })
+    .returning();
+  return row;
+}
+
+export async function markActivationTokenUsed(tokenId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db
+    .update(botActivationTokens)
+    .set({ isUsed: "true" })
+    .where(eq(botActivationTokens.id, tokenId));
+}
+
+/** Paid Telegram access: limit > 0 and not on free website tier. */
+export function hasTelegramCredits(
+  user: {
+    bizMessageLimit?: number | null;
+    founderMessageLimit?: number | null;
+    planTypeBiz?: string | null;
+    planTypeFounder?: string | null;
+  },
+  advisor: AdvisorSlug,
+): boolean {
+  if (advisor === "bizpilot") {
+    const limit = user.bizMessageLimit ?? 0;
+    const planType = user.planTypeBiz ?? "free";
+    return limit > 0 && planType !== "free";
+  }
+  const limit = user.founderMessageLimit ?? 0;
+  const planType = user.planTypeFounder ?? "free";
+  return limit > 0 && planType !== "free";
+}
+
+export async function decrementTelegramMessageLimit(userId: number, advisor: AdvisorSlug) {
+  const db = await getDb();
+  if (!db) return;
+  const user = await getUserById(userId);
+  if (!user) return;
+  if (advisor === "bizpilot") {
+    const newLimit = Math.max(0, (user.bizMessageLimit ?? 0) - 1);
+    await db.update(users).set({ bizMessageLimit: newLimit }).where(eq(users.id, userId));
+  } else {
+    const newLimit = Math.max(0, (user.founderMessageLimit ?? 0) - 1);
+    await db.update(users).set({ founderMessageLimit: newLimit }).where(eq(users.id, userId));
+  }
 }

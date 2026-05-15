@@ -6,6 +6,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { registerPublicApiRoutes } from "../publicApi";
+import { registerTelegramRoutes } from "../telegram";
 
 export type CreateAppOptions = {
   /**
@@ -28,6 +29,7 @@ export function createApp(_options: CreateAppOptions = {}): Express {
 
   registerStorageProxy(app);
   registerPublicApiRoutes(app);
+  registerTelegramRoutes(app);
   registerOAuthRoutes(app);
 
   app.use(

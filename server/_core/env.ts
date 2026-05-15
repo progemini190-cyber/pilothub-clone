@@ -25,4 +25,8 @@ export const ENV = {
 
   /** Comma-separated emails auto-promoted to admin on Google login (see adminAccess.ts). */
   adminEmail: process.env.ADMIN_EMAIL ?? "",
+
+  /** Telegram bot tokens (BizPilot / FounderPilot paid channels). */
+  telegramBizBotToken: process.env.TELEGRAM_BIZ_BOT_TOKEN ?? "",
+  telegramFounderBotToken: process.env.TELEGRAM_FOUNDER_BOT_TOKEN ?? "",
 };
