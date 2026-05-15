@@ -933,23 +933,28 @@ export async function listRecentTelegramLlmTurnsForAdvisor(
   const db = await getDb();
   if (!db) return [];
   const cap = Math.min(Math.max(1, maxMessages), MAX_TELEGRAM_LLM_TURNS);
-  const rows = await db
-    .select({
-      role: telegramLlmTurns.role,
-      content: telegramLlmTurns.content,
-    })
-    .from(telegramLlmTurns)
-    .where(and(eq(telegramLlmTurns.userId, userId), eq(telegramLlmTurns.advisor, advisor)))
-    .orderBy(desc(telegramLlmTurns.createdAt))
-    .limit(cap);
+  try {
+    const rows = await db
+      .select({
+        role: telegramLlmTurns.role,
+        content: telegramLlmTurns.content,
+      })
+      .from(telegramLlmTurns)
+      .where(and(eq(telegramLlmTurns.userId, userId), eq(telegramLlmTurns.advisor, advisor)))
+      .orderBy(desc(telegramLlmTurns.createdAt))
+      .limit(cap);
 
-  return rows
-    .reverse()
-    .filter((r) => r.role === "user" || r.role === "assistant")
-    .map((r) => ({
-      role: r.role as "user" | "assistant",
-      content: r.content,
-    }));
+    return rows
+      .reverse()
+      .filter((r) => r.role === "user" || r.role === "assistant")
+      .map((r) => ({
+        role: r.role as "user" | "assistant",
+        content: r.content,
+      }));
+  } catch (err) {
+    console.error("[db] listRecentTelegramLlmTurnsForAdvisor (telegram_llm_turns) failed:", err);
+    return [];
+  }
 }
 
 export async function appendTelegramLlmTurnPair(
@@ -961,38 +966,42 @@ export async function appendTelegramLlmTurnPair(
   const db = await getDb();
   if (!db) return;
 
-  const now = new Date();
-  await db.insert(telegramLlmTurns).values([
-    {
-      userId,
-      advisor,
-      role: "user",
-      content: clipTelegramTurnContent(userContent),
-      createdAt: now,
-    },
-    {
-      userId,
-      advisor,
-      role: "assistant",
-      content: clipTelegramTurnContent(assistantContent),
-      createdAt: now,
-    },
-  ]);
+  try {
+    const now = new Date();
+    await db.insert(telegramLlmTurns).values([
+      {
+        userId,
+        advisor,
+        role: "user",
+        content: clipTelegramTurnContent(userContent),
+        createdAt: now,
+      },
+      {
+        userId,
+        advisor,
+        role: "assistant",
+        content: clipTelegramTurnContent(assistantContent),
+        createdAt: now,
+      },
+    ]);
 
-  const ids = await db
-    .select({ id: telegramLlmTurns.id })
-    .from(telegramLlmTurns)
-    .where(and(eq(telegramLlmTurns.userId, userId), eq(telegramLlmTurns.advisor, advisor)))
-    .orderBy(desc(telegramLlmTurns.createdAt));
+    const ids = await db
+      .select({ id: telegramLlmTurns.id })
+      .from(telegramLlmTurns)
+      .where(and(eq(telegramLlmTurns.userId, userId), eq(telegramLlmTurns.advisor, advisor)))
+      .orderBy(desc(telegramLlmTurns.createdAt));
 
-  const toDrop = ids.slice(MAX_TELEGRAM_LLM_TURNS);
-  if (toDrop.length === 0) return;
-  await db.delete(telegramLlmTurns).where(
-    inArray(
-      telegramLlmTurns.id,
-      toDrop.map((r) => r.id),
-    ),
-  );
+    const toDrop = ids.slice(MAX_TELEGRAM_LLM_TURNS);
+    if (toDrop.length === 0) return;
+    await db.delete(telegramLlmTurns).where(
+      inArray(
+        telegramLlmTurns.id,
+        toDrop.map((r) => r.id),
+      ),
+    );
+  } catch (err) {
+    console.error("[db] appendTelegramLlmTurnPair (telegram_llm_turns) failed:", err);
+  }
 }
 
 export type TelegramAdminUserRow = {

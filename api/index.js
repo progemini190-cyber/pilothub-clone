@@ -8,6 +8,18 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// shared/const.ts
+var COOKIE_NAME, ONE_YEAR_MS, UNAUTHED_ERR_MSG, NOT_ADMIN_ERR_MSG;
+var init_const = __esm({
+  "shared/const.ts"() {
+    "use strict";
+    COOKIE_NAME = "app_session_id";
+    ONE_YEAR_MS = 1e3 * 60 * 60 * 24 * 365;
+    UNAUTHED_ERR_MSG = "Please login (10001)";
+    NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
+  }
+});
+
 // server/_core/env.ts
 var ENV;
 var init_env = __esm({
@@ -36,8 +48,38 @@ var init_env = __esm({
        */
       ownerGoogleSub: process.env.GOOGLE_OWNER_SUB ?? process.env.OWNER_OPEN_ID ?? "",
       /** Comma-separated emails auto-promoted to admin on Google login (see adminAccess.ts). */
-      adminEmail: process.env.ADMIN_EMAIL ?? ""
+      adminEmail: process.env.ADMIN_EMAIL ?? "",
+      /** Telegram bot tokens (BizPilot / FounderPilot paid channels). */
+      telegramBizBotToken: process.env.TELEGRAM_BIZPILOT_TOKEN ?? process.env.TELEGRAM_BIZ_BOT_TOKEN ?? "",
+      telegramFounderBotToken: process.env.TELEGRAM_FOUNDERPILOT_TOKEN ?? process.env.TELEGRAM_FOUNDER_BOT_TOKEN ?? "",
+      /** BizPilot @username without @ — used in t.me activation links. */
+      telegramBizBotUsername: process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? process.env.VITE_TELEGRAM_BOT_USERNAME ?? process.env.TELEGRAM_BIZPILOT_BOT_USERNAME ?? process.env.TELEGRAM_BIZ_BOT_USERNAME ?? process.env.TELEGRAM_BOT_USERNAME ?? ""
     };
+  }
+});
+
+// server/_core/adminAccess.ts
+function getAdminEmails() {
+  const fromEnv = (process.env.ADMIN_EMAIL ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return [.../* @__PURE__ */ new Set([...DEFAULT_ADMIN_EMAILS, ...fromEnv])];
+}
+function isAdminEmail(email) {
+  if (!email) return false;
+  return getAdminEmails().includes(normalizeEmail(email));
+}
+function shouldGrantAdminRole(input) {
+  if (input.email && isAdminEmail(input.email)) return true;
+  if (input.ownerGoogleSub && input.googleSub && input.googleSub === input.ownerGoogleSub) {
+    return true;
+  }
+  return false;
+}
+var DEFAULT_ADMIN_EMAILS;
+var init_adminAccess = __esm({
+  "server/_core/adminAccess.ts"() {
+    "use strict";
+    init_db();
+    DEFAULT_ADMIN_EMAILS = ["progemini190@gmail.com"];
   }
 });
 
@@ -99,261 +141,158 @@ var init_userStatus = __esm({
   }
 });
 
-// server/storage.ts
-var storage_exports = {};
-__export(storage_exports, {
-  storageGet: () => storageGet,
-  storageGetSignedUrl: () => storageGetSignedUrl,
-  storagePut: () => storagePut
-});
-function getForgeConfig() {
-  const forgeUrl = ENV.forgeApiUrl;
-  const forgeKey = ENV.forgeApiKey;
-  if (!forgeUrl || !forgeKey) {
-    throw new Error(
-      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
-    );
-  }
-  return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
-}
-function normalizeKey(relKey) {
-  return relKey.replace(/^\/+/, "");
-}
-function appendHashSuffix(relKey) {
-  const hash = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
-  const lastDot = relKey.lastIndexOf(".");
-  if (lastDot === -1) return `${relKey}_${hash}`;
-  return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
-}
-async function storagePut(relKey, data, contentType = "application/octet-stream") {
-  const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = appendHashSuffix(normalizeKey(relKey));
-  const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
-  presignUrl.searchParams.set("path", key);
-  const presignResp = await fetch(presignUrl, {
-    headers: { Authorization: `Bearer ${forgeKey}` }
-  });
-  if (!presignResp.ok) {
-    const msg = await presignResp.text().catch(() => presignResp.statusText);
-    throw new Error(`Storage presign failed (${presignResp.status}): ${msg}`);
-  }
-  const { url: s3Url } = await presignResp.json();
-  if (!s3Url) throw new Error("Forge returned empty presign URL");
-  const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data], { type: contentType });
-  const uploadResp = await fetch(s3Url, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: blob
-  });
-  if (!uploadResp.ok) {
-    throw new Error(`Storage upload to S3 failed (${uploadResp.status})`);
-  }
-  return { key, url: `/manus-storage/${key}` };
-}
-async function storageGet(relKey) {
-  const key = normalizeKey(relKey);
-  return { key, url: `/manus-storage/${key}` };
-}
-async function storageGetSignedUrl(relKey) {
-  const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = normalizeKey(relKey);
-  const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
-  getUrl.searchParams.set("path", key);
-  const resp = await fetch(getUrl, {
-    headers: { Authorization: `Bearer ${forgeKey}` }
-  });
-  if (!resp.ok) {
-    const msg = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Storage signed URL failed (${resp.status}): ${msg}`);
-  }
-  const { url } = await resp.json();
-  return url;
-}
-var init_storage = __esm({
-  "server/storage.ts"() {
-    "use strict";
-    init_env();
-  }
-});
-
-// scripts/vercel-api-entry.ts
-import "dotenv/config";
-
-// server/_core/app.ts
-import express from "express";
-import cookieParser from "cookie-parser";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
-
-// server/_core/oauth.ts
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-
-// shared/const.ts
-var COOKIE_NAME = "app_session_id";
-var ONE_YEAR_MS = 1e3 * 60 * 60 * 24 * 365;
-var UNAUTHED_ERR_MSG = "Please login (10001)";
-var NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
-
-// server/db.ts
-init_env();
-import { eq, and, desc, asc, sql as sql2 } from "drizzle-orm";
-
-// server/_core/adminAccess.ts
-var DEFAULT_ADMIN_EMAILS = ["progemini190@gmail.com"];
-function getAdminEmails() {
-  const fromEnv = (process.env.ADMIN_EMAIL ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return [.../* @__PURE__ */ new Set([...DEFAULT_ADMIN_EMAILS, ...fromEnv])];
-}
-function isAdminEmail(email) {
-  if (!email) return false;
-  return getAdminEmails().includes(normalizeEmail(email));
-}
-function shouldGrantAdminRole(input) {
-  if (input.email && isAdminEmail(input.email)) return true;
-  if (input.ownerGoogleSub && input.googleSub && input.googleSub === input.ownerGoogleSub) {
-    return true;
-  }
-  return false;
-}
-
-// server/db.ts
-init_userStatus();
-
-// server/db/connection.ts
-import { createClient } from "@libsql/client";
-import { sql } from "drizzle-orm";
-import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
-import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
-
 // drizzle/schema.ts
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
-var users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  openId: text("openId", { length: 255 }).notNull().unique(),
-  name: text("name"),
-  email: text("email", { length: 320 }),
-  businessName: text("businessName"),
-  businessType: text("businessType", { length: 128 }),
-  useCase: text("useCase"),
-  phone: text("phone", { length: 20 }),
-  loginMethod: text("loginMethod", { length: 64 }),
-  role: text("role", { enum: ["user", "admin"] }).notNull().default("user"),
-  plan: text("plan", { length: 64 }).default("free"),
-  status: text("status", { length: 64 }).default("active"),
-  subscriptionStart: integer("subscriptionStart", { mode: "timestamp_ms" }),
-  subscriptionEnd: integer("subscriptionEnd", { mode: "timestamp_ms" }),
-  notes: text("notes"),
-  freeBizCount: integer("freeBizCount").default(5).notNull(),
-  freeFounderCount: integer("freeFounderCount").default(5).notNull(),
-  planTypeBiz: text("planTypeBiz", { enum: ["free", "starter", "pro"] }).notNull().default("free"),
-  planTypeFounder: text("planTypeFounder", { enum: ["free", "starter", "pro"] }).notNull().default("free"),
-  bizMessageLimit: integer("bizMessageLimit").default(5).notNull(),
-  founderMessageLimit: integer("founderMessageLimit").default(5).notNull(),
-  bizMessagesUsed: integer("bizMessagesUsed").default(0).notNull(),
-  founderMessagesUsed: integer("founderMessagesUsed").default(0).notNull(),
-  hasUsedBizStarter: text("hasUsedBizStarter", { enum: ["true", "false"] }).notNull().default("false"),
-  hasUsedFounderStarter: text("hasUsedFounderStarter", { enum: ["true", "false"] }).notNull().default("false"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date()),
-  lastSignedIn: integer("lastSignedIn", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
-});
-var conversations = sqliteTable("conversations", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("userId").notNull(),
-  modelSlug: text("modelSlug", { length: 64 }).notNull(),
-  title: text("title"),
-  summary: text("summary"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
-});
-var messages = sqliteTable("messages", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  conversationId: integer("conversationId").notNull(),
-  role: text("role", { length: 64 }).notNull(),
-  content: text("content").notNull(),
-  tokenCount: integer("tokenCount"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
-});
-var systemPrompts = sqliteTable("systemPrompts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  modelSlug: text("modelSlug", { length: 64 }).notNull(),
-  content: text("content").notNull(),
-  version: integer("version").default(1).notNull(),
-  isActive: text("isActive", { enum: ["true", "false"] }).default("false"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
-});
-var aiModels = sqliteTable("aiModels", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  targetRole: text("targetRole", { length: 64 }).notNull().unique(),
-  modelString: text("modelString").notNull(),
-  isActive: text("isActive", { enum: ["true", "false"] }).default("true"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
-});
-var apiKeys = sqliteTable("apiKeys", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  provider: text("provider", { length: 64 }).notNull(),
-  keyValue: text("keyValue").notNull(),
-  isActive: text("isActive", { enum: ["true", "false"] }).default("false"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
-});
-var payments = sqliteTable("payments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("userId"),
-  userName: text("userName"),
-  userEmail: text("userEmail", { length: 320 }),
-  plan: text("plan", { length: 64 }).notNull(),
-  amount: integer("amount").notNull(),
-  currency: text("currency", { length: 10 }).default("MMK").notNull(),
-  status: text("status", { enum: ["pending", "confirmed", "rejected"] }).default("pending").notNull(),
-  paymentMethod: text("paymentMethod", { length: 64 }),
-  transactionRef: text("transactionRef", { length: 255 }),
-  screenshotUrl: text("screenshotUrl"),
-  notes: text("notes"),
-  source: text("source", { length: 32 }).default("website"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
-});
-var systemSettings = sqliteTable("systemSettings", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  key: text("key", { length: 128 }).notNull().unique(),
-  value: text("value"),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
-});
-var applications = sqliteTable("applications", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  fullName: text("fullName").notNull(),
-  email: text("email", { length: 320 }).notNull(),
-  phone: text("phone", { length: 20 }),
-  businessName: text("businessName"),
-  businessType: text("businessType", { length: 128 }),
-  useCase: text("useCase"),
-  plan: text("plan", { length: 64 }).default("free"),
-  status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending").notNull(),
-  source: text("source", { length: 32 }).default("website"),
-  userId: integer("userId"),
-  notes: text("notes"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
-});
-var externalApiTokens = sqliteTable("externalApiTokens", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name", { length: 128 }).notNull(),
-  token: text("token", { length: 256 }).notNull().unique(),
-  isActive: text("isActive", { enum: ["true", "false"] }).default("true"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
-});
-var announcements = sqliteTable("announcements", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title", { length: 256 }).notNull(),
-  content: text("content").notNull(),
-  type: text("type", { enum: ["info", "success", "warning", "urgent"] }).default("info").notNull(),
-  isActive: text("isActive", { enum: ["true", "false"] }).default("true").notNull(),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+var users, conversations, messages, systemPrompts, aiModels, apiKeys, payments, systemSettings, applications, externalApiTokens, announcements, botActivationTokens, telegramLlmTurns;
+var init_schema = __esm({
+  "drizzle/schema.ts"() {
+    "use strict";
+    users = sqliteTable("users", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      openId: text("openId", { length: 255 }).notNull().unique(),
+      name: text("name"),
+      email: text("email", { length: 320 }),
+      businessName: text("businessName"),
+      businessType: text("businessType", { length: 128 }),
+      useCase: text("useCase"),
+      phone: text("phone", { length: 20 }),
+      loginMethod: text("loginMethod", { length: 64 }),
+      role: text("role", { enum: ["user", "admin"] }).notNull().default("user"),
+      plan: text("plan", { length: 64 }).default("free"),
+      status: text("status", { length: 64 }).default("active"),
+      subscriptionStart: integer("subscriptionStart", { mode: "timestamp_ms" }),
+      subscriptionEnd: integer("subscriptionEnd", { mode: "timestamp_ms" }),
+      notes: text("notes"),
+      freeBizCount: integer("freeBizCount").default(5).notNull(),
+      freeFounderCount: integer("freeFounderCount").default(5).notNull(),
+      planTypeBiz: text("planTypeBiz", { enum: ["free", "starter", "pro"] }).notNull().default("free"),
+      planTypeFounder: text("planTypeFounder", { enum: ["free", "starter", "pro"] }).notNull().default("free"),
+      bizMessageLimit: integer("bizMessageLimit").default(5).notNull(),
+      founderMessageLimit: integer("founderMessageLimit").default(5).notNull(),
+      bizMessagesUsed: integer("bizMessagesUsed").default(0).notNull(),
+      founderMessagesUsed: integer("founderMessagesUsed").default(0).notNull(),
+      hasUsedBizStarter: text("hasUsedBizStarter", { enum: ["true", "false"] }).notNull().default("false"),
+      hasUsedFounderStarter: text("hasUsedFounderStarter", { enum: ["true", "false"] }).notNull().default("false"),
+      telegramChatId: text("telegramChatId", { length: 64 }),
+      planExpiryDate: integer("planExpiryDate", { mode: "timestamp_ms" }),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date()),
+      lastSignedIn: integer("lastSignedIn", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
+    });
+    conversations = sqliteTable("conversations", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      userId: integer("userId").notNull(),
+      modelSlug: text("modelSlug", { length: 64 }).notNull(),
+      title: text("title"),
+      summary: text("summary"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+    });
+    messages = sqliteTable("messages", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      conversationId: integer("conversationId").notNull(),
+      role: text("role", { length: 64 }).notNull(),
+      content: text("content").notNull(),
+      tokenCount: integer("tokenCount"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
+    });
+    systemPrompts = sqliteTable("systemPrompts", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      name: text("name").notNull(),
+      modelSlug: text("modelSlug", { length: 64 }).notNull(),
+      content: text("content").notNull(),
+      version: integer("version").default(1).notNull(),
+      isActive: text("isActive", { enum: ["true", "false"] }).default("false"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+    });
+    aiModels = sqliteTable("aiModels", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      targetRole: text("targetRole", { length: 64 }).notNull().unique(),
+      modelString: text("modelString").notNull(),
+      isActive: text("isActive", { enum: ["true", "false"] }).default("true"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+    });
+    apiKeys = sqliteTable("apiKeys", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      provider: text("provider", { length: 64 }).notNull(),
+      keyValue: text("keyValue").notNull(),
+      isActive: text("isActive", { enum: ["true", "false"] }).default("false"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+    });
+    payments = sqliteTable("payments", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      userId: integer("userId"),
+      userName: text("userName"),
+      userEmail: text("userEmail", { length: 320 }),
+      plan: text("plan", { length: 64 }).notNull(),
+      amount: integer("amount").notNull(),
+      currency: text("currency", { length: 10 }).default("MMK").notNull(),
+      status: text("status", { enum: ["pending", "confirmed", "rejected"] }).default("pending").notNull(),
+      paymentMethod: text("paymentMethod", { length: 64 }),
+      transactionRef: text("transactionRef", { length: 255 }),
+      screenshotUrl: text("screenshotUrl"),
+      notes: text("notes"),
+      source: text("source", { length: 32 }).default("website"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+    });
+    systemSettings = sqliteTable("systemSettings", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      key: text("key", { length: 128 }).notNull().unique(),
+      value: text("value"),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+    });
+    applications = sqliteTable("applications", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      fullName: text("fullName").notNull(),
+      email: text("email", { length: 320 }).notNull(),
+      phone: text("phone", { length: 20 }),
+      businessName: text("businessName"),
+      businessType: text("businessType", { length: 128 }),
+      useCase: text("useCase"),
+      plan: text("plan", { length: 64 }).default("free"),
+      status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending").notNull(),
+      source: text("source", { length: 32 }).default("website"),
+      userId: integer("userId"),
+      notes: text("notes"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+    });
+    externalApiTokens = sqliteTable("externalApiTokens", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      name: text("name", { length: 128 }).notNull(),
+      token: text("token", { length: 256 }).notNull().unique(),
+      isActive: text("isActive", { enum: ["true", "false"] }).default("true"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
+    });
+    announcements = sqliteTable("announcements", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      title: text("title", { length: 256 }).notNull(),
+      content: text("content").notNull(),
+      type: text("type", { enum: ["info", "success", "warning", "urgent"] }).default("info").notNull(),
+      isActive: text("isActive", { enum: ["true", "false"] }).default("true").notNull(),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
+      updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
+    });
+    botActivationTokens = sqliteTable("bot_activation_tokens", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      token: text("token", { length: 64 }).notNull().unique(),
+      userId: integer("userId").notNull(),
+      isUsed: text("isUsed", { enum: ["true", "false"] }).notNull().default("false"),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
+    });
+    telegramLlmTurns = sqliteTable("telegram_llm_turns", {
+      id: integer("id").primaryKey({ autoIncrement: true }),
+      userId: integer("userId").notNull(),
+      advisor: text("advisor", { length: 32 }).notNull(),
+      role: text("role", { length: 16 }).notNull(),
+      content: text("content").notNull(),
+      createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
+    });
+  }
 });
 
 // drizzle/schema.mysql.ts
@@ -363,12 +302,14 @@ __export(schema_mysql_exports, {
   announcements: () => announcements2,
   apiKeys: () => apiKeys2,
   applications: () => applications2,
+  botActivationTokens: () => botActivationTokens2,
   conversations: () => conversations2,
   externalApiTokens: () => externalApiTokens2,
   messages: () => messages2,
   payments: () => payments2,
   systemPrompts: () => systemPrompts2,
   systemSettings: () => systemSettings2,
+  telegramLlmTurns: () => telegramLlmTurns2,
   users: () => users2
 });
 import {
@@ -379,152 +320,301 @@ import {
   timestamp,
   mysqlEnum
 } from "drizzle-orm/mysql-core";
-var users2 = mysqlTable("users", {
-  id: int("id").primaryKey().autoincrement(),
-  openId: varchar("openId", { length: 255 }).notNull().unique(),
-  name: text2("name"),
-  email: varchar("email", { length: 320 }),
-  businessName: text2("businessName"),
-  businessType: varchar("businessType", { length: 128 }),
-  useCase: text2("useCase"),
-  phone: varchar("phone", { length: 20 }),
-  loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).notNull().default("user"),
-  plan: varchar("plan", { length: 64 }).default("free"),
-  status: varchar("status", { length: 64 }).default("active"),
-  subscriptionStart: timestamp("subscriptionStart"),
-  subscriptionEnd: timestamp("subscriptionEnd"),
-  notes: text2("notes"),
-  freeBizCount: int("freeBizCount").default(5).notNull(),
-  freeFounderCount: int("freeFounderCount").default(5).notNull(),
-  planTypeBiz: mysqlEnum("planTypeBiz", ["free", "starter", "pro"]).notNull().default("free"),
-  planTypeFounder: mysqlEnum("planTypeFounder", ["free", "starter", "pro"]).notNull().default("free"),
-  bizMessageLimit: int("bizMessageLimit").default(5).notNull(),
-  founderMessageLimit: int("founderMessageLimit").default(5).notNull(),
-  bizMessagesUsed: int("bizMessagesUsed").default(0).notNull(),
-  founderMessagesUsed: int("founderMessagesUsed").default(0).notNull(),
-  hasUsedBizStarter: mysqlEnum("hasUsedBizStarter", ["true", "false"]).notNull().default("false"),
-  hasUsedFounderStarter: mysqlEnum("hasUsedFounderStarter", ["true", "false"]).notNull().default("false"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
-  lastSignedIn: timestamp("lastSignedIn").notNull().defaultNow()
+var users2, payments2, apiKeys2, systemPrompts2, applications2, aiModels2, systemSettings2, conversations2, messages2, externalApiTokens2, announcements2, botActivationTokens2, telegramLlmTurns2;
+var init_schema_mysql = __esm({
+  "drizzle/schema.mysql.ts"() {
+    "use strict";
+    users2 = mysqlTable("users", {
+      id: int("id").primaryKey().autoincrement(),
+      openId: varchar("openId", { length: 255 }).notNull().unique(),
+      name: text2("name"),
+      email: varchar("email", { length: 320 }),
+      businessName: text2("businessName"),
+      businessType: varchar("businessType", { length: 128 }),
+      useCase: text2("useCase"),
+      phone: varchar("phone", { length: 20 }),
+      loginMethod: varchar("loginMethod", { length: 64 }),
+      role: mysqlEnum("role", ["user", "admin"]).notNull().default("user"),
+      plan: varchar("plan", { length: 64 }).default("free"),
+      status: varchar("status", { length: 64 }).default("active"),
+      subscriptionStart: timestamp("subscriptionStart"),
+      subscriptionEnd: timestamp("subscriptionEnd"),
+      notes: text2("notes"),
+      freeBizCount: int("freeBizCount").default(5).notNull(),
+      freeFounderCount: int("freeFounderCount").default(5).notNull(),
+      planTypeBiz: mysqlEnum("planTypeBiz", ["free", "starter", "pro"]).notNull().default("free"),
+      planTypeFounder: mysqlEnum("planTypeFounder", ["free", "starter", "pro"]).notNull().default("free"),
+      bizMessageLimit: int("bizMessageLimit").default(5).notNull(),
+      founderMessageLimit: int("founderMessageLimit").default(5).notNull(),
+      bizMessagesUsed: int("bizMessagesUsed").default(0).notNull(),
+      founderMessagesUsed: int("founderMessagesUsed").default(0).notNull(),
+      hasUsedBizStarter: mysqlEnum("hasUsedBizStarter", ["true", "false"]).notNull().default("false"),
+      hasUsedFounderStarter: mysqlEnum("hasUsedFounderStarter", ["true", "false"]).notNull().default("false"),
+      telegramChatId: varchar("telegramChatId", { length: 64 }),
+      planExpiryDate: timestamp("planExpiryDate"),
+      createdAt: timestamp("createdAt").notNull().defaultNow(),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
+      lastSignedIn: timestamp("lastSignedIn").notNull().defaultNow()
+    });
+    payments2 = mysqlTable("payments", {
+      id: int("id").primaryKey().autoincrement(),
+      userId: int("userId"),
+      userName: text2("userName"),
+      userEmail: varchar("userEmail", { length: 320 }),
+      plan: varchar("plan", { length: 64 }).notNull(),
+      amount: int("amount").notNull(),
+      currency: varchar("currency", { length: 10 }).default("MMK").notNull(),
+      status: mysqlEnum("status", ["pending", "confirmed", "rejected"]).default("pending").notNull(),
+      paymentMethod: varchar("paymentMethod", { length: 64 }),
+      transactionRef: varchar("transactionRef", { length: 255 }),
+      screenshotUrl: text2("screenshotUrl"),
+      notes: text2("notes"),
+      source: varchar("source", { length: 32 }).default("website"),
+      createdAt: timestamp("createdAt").notNull().defaultNow(),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+    });
+    apiKeys2 = mysqlTable("apiKeys", {
+      id: int("id").primaryKey().autoincrement(),
+      provider: varchar("provider", { length: 64 }).notNull(),
+      keyValue: text2("keyValue").notNull(),
+      isActive: mysqlEnum("isActive", ["true", "false"]).default("false"),
+      createdAt: timestamp("createdAt").notNull().defaultNow(),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+    });
+    systemPrompts2 = mysqlTable("systemPrompts", {
+      id: int("id").primaryKey().autoincrement(),
+      name: text2("name").notNull(),
+      modelSlug: varchar("modelSlug", { length: 64 }).notNull(),
+      content: text2("content").notNull(),
+      version: int("version").default(1).notNull(),
+      isActive: mysqlEnum("isActive", ["true", "false"]).default("false"),
+      createdAt: timestamp("createdAt").notNull().defaultNow(),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+    });
+    applications2 = mysqlTable("applications", {
+      id: int("id").primaryKey().autoincrement(),
+      fullName: text2("fullName").notNull(),
+      email: varchar("email", { length: 320 }).notNull(),
+      phone: varchar("phone", { length: 20 }),
+      businessName: text2("businessName"),
+      businessType: varchar("businessType", { length: 128 }),
+      useCase: text2("useCase"),
+      plan: varchar("plan", { length: 64 }).default("free"),
+      status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+      source: varchar("source", { length: 32 }).default("website"),
+      userId: int("userId"),
+      notes: text2("notes"),
+      createdAt: timestamp("createdAt").notNull().defaultNow(),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+    });
+    aiModels2 = mysqlTable("aiModels", {
+      id: int("id").primaryKey().autoincrement(),
+      targetRole: varchar("targetRole", { length: 64 }).notNull().unique(),
+      modelString: text2("modelString").notNull(),
+      isActive: mysqlEnum("isActive", ["true", "false"]).default("true"),
+      createdAt: timestamp("createdAt").notNull().defaultNow(),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+    });
+    systemSettings2 = mysqlTable("systemSettings", {
+      id: int("id").primaryKey().autoincrement(),
+      key: varchar("key", { length: 128 }).notNull().unique(),
+      value: text2("value"),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+    });
+    conversations2 = mysqlTable("conversations", {
+      id: int("id").primaryKey().autoincrement(),
+      userId: int("userId").notNull(),
+      modelSlug: varchar("modelSlug", { length: 64 }).notNull(),
+      title: text2("title"),
+      summary: text2("summary"),
+      createdAt: timestamp("createdAt").notNull().defaultNow(),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+    });
+    messages2 = mysqlTable("messages", {
+      id: int("id").primaryKey().autoincrement(),
+      conversationId: int("conversationId").notNull(),
+      role: varchar("role", { length: 64 }).notNull(),
+      content: text2("content").notNull(),
+      tokenCount: int("tokenCount"),
+      createdAt: timestamp("createdAt").notNull().defaultNow()
+    });
+    externalApiTokens2 = mysqlTable("externalApiTokens", {
+      id: int("id").primaryKey().autoincrement(),
+      name: varchar("name", { length: 128 }).notNull(),
+      token: varchar("token", { length: 256 }).notNull().unique(),
+      isActive: mysqlEnum("isActive", ["true", "false"]).default("true"),
+      createdAt: timestamp("createdAt").notNull().defaultNow()
+    });
+    announcements2 = mysqlTable("announcements", {
+      id: int("id").primaryKey().autoincrement(),
+      title: varchar("title", { length: 256 }).notNull(),
+      content: text2("content").notNull(),
+      type: mysqlEnum("type", ["info", "success", "warning", "urgent"]).default("info").notNull(),
+      isActive: mysqlEnum("isActive", ["true", "false"]).default("true").notNull(),
+      createdAt: timestamp("createdAt").notNull().defaultNow(),
+      updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+    });
+    botActivationTokens2 = mysqlTable("bot_activation_tokens", {
+      id: int("id").primaryKey().autoincrement(),
+      token: varchar("token", { length: 64 }).notNull().unique(),
+      userId: int("userId").notNull(),
+      isUsed: mysqlEnum("isUsed", ["true", "false"]).notNull().default("false"),
+      createdAt: timestamp("createdAt").notNull().defaultNow()
+    });
+    telegramLlmTurns2 = mysqlTable("telegram_llm_turns", {
+      id: int("id").primaryKey().autoincrement(),
+      userId: int("userId").notNull(),
+      advisor: varchar("advisor", { length: 32 }).notNull(),
+      role: varchar("role", { length: 16 }).notNull(),
+      content: text2("content").notNull(),
+      createdAt: timestamp("createdAt").notNull().defaultNow()
+    });
+  }
 });
-var payments2 = mysqlTable("payments", {
-  id: int("id").primaryKey().autoincrement(),
-  userId: int("userId"),
-  userName: text2("userName"),
-  userEmail: varchar("userEmail", { length: 320 }),
-  plan: varchar("plan", { length: 64 }).notNull(),
-  amount: int("amount").notNull(),
-  currency: varchar("currency", { length: 10 }).default("MMK").notNull(),
-  status: mysqlEnum("status", ["pending", "confirmed", "rejected"]).default("pending").notNull(),
-  paymentMethod: varchar("paymentMethod", { length: 64 }),
-  transactionRef: varchar("transactionRef", { length: 255 }),
-  screenshotUrl: text2("screenshotUrl"),
-  notes: text2("notes"),
-  source: varchar("source", { length: 32 }).default("website"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+
+// server/db/ensureTelegramSchema.ts
+var ensureTelegramSchema_exports = {};
+__export(ensureTelegramSchema_exports, {
+  ensureTelegramSchema: () => ensureTelegramSchema,
+  resetTelegramSchemaCache: () => resetTelegramSchemaCache
 });
-var apiKeys2 = mysqlTable("apiKeys", {
-  id: int("id").primaryKey().autoincrement(),
-  provider: varchar("provider", { length: 64 }).notNull(),
-  keyValue: text2("keyValue").notNull(),
-  isActive: mysqlEnum("isActive", ["true", "false"]).default("false"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
-});
-var systemPrompts2 = mysqlTable("systemPrompts", {
-  id: int("id").primaryKey().autoincrement(),
-  name: text2("name").notNull(),
-  modelSlug: varchar("modelSlug", { length: 64 }).notNull(),
-  content: text2("content").notNull(),
-  version: int("version").default(1).notNull(),
-  isActive: mysqlEnum("isActive", ["true", "false"]).default("false"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
-});
-var applications2 = mysqlTable("applications", {
-  id: int("id").primaryKey().autoincrement(),
-  fullName: text2("fullName").notNull(),
-  email: varchar("email", { length: 320 }).notNull(),
-  phone: varchar("phone", { length: 20 }),
-  businessName: text2("businessName"),
-  businessType: varchar("businessType", { length: 128 }),
-  useCase: text2("useCase"),
-  plan: varchar("plan", { length: 64 }).default("free"),
-  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
-  source: varchar("source", { length: 32 }).default("website"),
-  userId: int("userId"),
-  notes: text2("notes"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
-});
-var aiModels2 = mysqlTable("aiModels", {
-  id: int("id").primaryKey().autoincrement(),
-  targetRole: varchar("targetRole", { length: 64 }).notNull().unique(),
-  modelString: text2("modelString").notNull(),
-  isActive: mysqlEnum("isActive", ["true", "false"]).default("true"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
-});
-var systemSettings2 = mysqlTable("systemSettings", {
-  id: int("id").primaryKey().autoincrement(),
-  key: varchar("key", { length: 128 }).notNull().unique(),
-  value: text2("value"),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
-});
-var conversations2 = mysqlTable("conversations", {
-  id: int("id").primaryKey().autoincrement(),
-  userId: int("userId").notNull(),
-  modelSlug: varchar("modelSlug", { length: 64 }).notNull(),
-  title: text2("title"),
-  summary: text2("summary"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
-});
-var messages2 = mysqlTable("messages", {
-  id: int("id").primaryKey().autoincrement(),
-  conversationId: int("conversationId").notNull(),
-  role: varchar("role", { length: 64 }).notNull(),
-  content: text2("content").notNull(),
-  tokenCount: int("tokenCount"),
-  createdAt: timestamp("createdAt").notNull().defaultNow()
-});
-var externalApiTokens2 = mysqlTable("externalApiTokens", {
-  id: int("id").primaryKey().autoincrement(),
-  name: varchar("name", { length: 128 }).notNull(),
-  token: varchar("token", { length: 256 }).notNull().unique(),
-  isActive: mysqlEnum("isActive", ["true", "false"]).default("true"),
-  createdAt: timestamp("createdAt").notNull().defaultNow()
-});
-var announcements2 = mysqlTable("announcements", {
-  id: int("id").primaryKey().autoincrement(),
-  title: varchar("title", { length: 256 }).notNull(),
-  content: text2("content").notNull(),
-  type: mysqlEnum("type", ["info", "success", "warning", "urgent"]).default("info").notNull(),
-  isActive: mysqlEnum("isActive", ["true", "false"]).default("true").notNull(),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+import { createClient } from "@libsql/client";
+import { sql } from "drizzle-orm";
+function resetTelegramSchemaCache() {
+  _ready = false;
+}
+function isBenignMigrationError(err) {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return msg.includes("duplicate column") || msg.includes("already exists") || msg.includes("duplicate key name");
+}
+async function runTurso(statement) {
+  const config = resolveTursoConfig();
+  if (!config) return;
+  const client = createClient({
+    url: config.url,
+    authToken: config.authToken
+  });
+  try {
+    await client.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError(err)) throw err;
+  }
+}
+async function runMysql(statement) {
+  const pool = getMysqlPool();
+  if (!pool) return;
+  try {
+    await pool.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError(err)) throw err;
+  }
+}
+async function runDrizzle(statement) {
+  const db = await getDb();
+  if (!db) return;
+  const query = sql.raw(statement);
+  const d = db;
+  try {
+    if (typeof d.execute === "function") {
+      await d.execute(query);
+    } else if (typeof d.run === "function") {
+      await d.run(query);
+    }
+  } catch (err) {
+    if (!isBenignMigrationError(err)) throw err;
+  }
+}
+async function runStatement(statement) {
+  const provider = getDatabaseProvider();
+  if (provider === "mysql") {
+    await runMysql(statement);
+  } else if (resolveTursoConfig()) {
+    await runTurso(statement);
+  } else {
+    await runDrizzle(statement);
+  }
+}
+async function ensureTelegramLlmTurnsTable() {
+  const provider = getDatabaseProvider();
+  if (provider === "mysql") {
+    await runStatement(
+      `CREATE TABLE IF NOT EXISTS \`telegram_llm_turns\` (
+        \`id\` int AUTO_INCREMENT PRIMARY KEY,
+        \`userId\` int NOT NULL,
+        \`advisor\` varchar(32) NOT NULL,
+        \`role\` varchar(16) NOT NULL,
+        \`content\` text NOT NULL,
+        \`createdAt\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY \`telegram_llm_turns_user_advisor_created\` (\`userId\`, \`advisor\`, \`createdAt\`)
+      )`
+    );
+    return;
+  }
+  await runStatement(
+    `CREATE TABLE IF NOT EXISTS \`telegram_llm_turns\` (
+      \`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+      \`userId\` integer NOT NULL,
+      \`advisor\` text NOT NULL,
+      \`role\` text NOT NULL,
+      \`content\` text NOT NULL,
+      \`createdAt\` integer NOT NULL
+    )`
+  );
+  await runStatement(
+    "CREATE INDEX IF NOT EXISTS `telegram_llm_turns_user_advisor_created_idx` ON `telegram_llm_turns` (`userId`, `advisor`, `createdAt`)"
+  );
+}
+async function ensureTelegramSchema() {
+  if (!_ready) {
+    const provider = getDatabaseProvider();
+    if (provider === "mysql") {
+      await runStatement("ALTER TABLE `users` ADD COLUMN `telegramChatId` varchar(64)");
+      await runStatement("ALTER TABLE `users` ADD COLUMN `planExpiryDate` timestamp NULL");
+      await runStatement(
+        `CREATE TABLE IF NOT EXISTS \`bot_activation_tokens\` (
+        \`id\` int AUTO_INCREMENT PRIMARY KEY,
+        \`token\` varchar(64) NOT NULL UNIQUE,
+        \`userId\` int NOT NULL,
+        \`isUsed\` enum('true','false') NOT NULL DEFAULT 'false',
+        \`createdAt\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`
+      );
+    } else {
+      await runStatement("ALTER TABLE `users` ADD COLUMN `telegramChatId` text");
+      await runStatement("ALTER TABLE `users` ADD COLUMN `planExpiryDate` integer");
+      await runStatement(
+        `CREATE TABLE IF NOT EXISTS \`bot_activation_tokens\` (
+        \`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+        \`token\` text NOT NULL,
+        \`userId\` integer NOT NULL,
+        \`isUsed\` text DEFAULT 'false' NOT NULL,
+        \`createdAt\` integer NOT NULL
+      )`
+      );
+      await runStatement(
+        "CREATE UNIQUE INDEX IF NOT EXISTS `bot_activation_tokens_token_unique` ON `bot_activation_tokens` (`token`)"
+      );
+    }
+    _ready = true;
+    console.info("[Database] Telegram schema synced", { provider: provider ?? "turso" });
+  }
+  await ensureTelegramLlmTurnsTable();
+}
+var _ready;
+var init_ensureTelegramSchema = __esm({
+  "server/db/ensureTelegramSchema.ts"() {
+    "use strict";
+    init_connection();
+    _ready = false;
+  }
 });
 
 // server/db/connection.ts
-init_env();
-var _db = null;
-var _provider = null;
-var _mysqlPool = null;
-var _initLogged = false;
-var users3 = users;
-var payments3 = payments;
-var apiKeys3 = apiKeys;
-var systemPrompts3 = systemPrompts;
-var applications3 = applications;
-var aiModels3 = aiModels;
-var systemSettings3 = systemSettings;
-var conversations3 = conversations;
-var messages3 = messages;
-var externalApiTokens3 = externalApiTokens;
-var announcements3 = announcements;
+import { createClient as createClient2 } from "@libsql/client";
+import { sql as sql2 } from "drizzle-orm";
+import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
+import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 function applySchema(provider) {
   if (provider === "mysql") {
     users3 = users2;
@@ -538,6 +628,8 @@ function applySchema(provider) {
     messages3 = messages2;
     externalApiTokens3 = externalApiTokens2;
     announcements3 = announcements2;
+    botActivationTokens3 = botActivationTokens2;
+    telegramLlmTurns3 = telegramLlmTurns2;
   } else {
     users3 = users;
     payments3 = payments;
@@ -550,6 +642,8 @@ function applySchema(provider) {
     messages3 = messages;
     externalApiTokens3 = externalApiTokens;
     announcements3 = announcements;
+    botActivationTokens3 = botActivationTokens;
+    telegramLlmTurns3 = telegramLlmTurns;
   }
 }
 function resolveMysqlUrl() {
@@ -602,7 +696,7 @@ function tokenFingerprint(token) {
 }
 async function countUsers(database) {
   try {
-    const [row] = await database.select({ count: sql`count(*)` }).from(users3);
+    const [row] = await database.select({ count: sql2`count(*)` }).from(users3);
     return Number(row?.count ?? 0);
   } catch {
     return -1;
@@ -610,9 +704,9 @@ async function countUsers(database) {
 }
 async function logHealth(database, provider) {
   try {
-    const [userRow] = await database.select({ count: sql`count(*)` }).from(users3);
-    const [payRow] = await database.select({ count: sql`count(*)` }).from(payments3);
-    const [keyRow] = await database.select({ count: sql`count(*)` }).from(apiKeys3);
+    const [userRow] = await database.select({ count: sql2`count(*)` }).from(users3);
+    const [payRow] = await database.select({ count: sql2`count(*)` }).from(payments3);
+    const [keyRow] = await database.select({ count: sql2`count(*)` }).from(apiKeys3);
     const userCount = Number(userRow?.count ?? 0);
     console.info("[Database] Health check", {
       provider,
@@ -639,7 +733,7 @@ async function connectTurso(config) {
     });
     return null;
   }
-  const client = createClient({
+  const client = createClient2({
     url: config.url,
     authToken: config.authToken
   });
@@ -660,6 +754,9 @@ async function connectMysql(url) {
     return null;
   }
 }
+function getDatabaseProvider() {
+  return _provider;
+}
 async function initializeDatabase() {
   if (_db) return _db;
   const forceMysql = process.env.DATABASE_PROVIDER?.toLowerCase() === "mysql";
@@ -678,6 +775,10 @@ async function initializeDatabase() {
         await logHealth(_db, "mysql");
         _initLogged = true;
       }
+      const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+      await ensureTelegramSchema2().catch(
+        (err) => console.warn("[Database] Telegram schema migration skipped:", err)
+      );
       return _db;
     }
   }
@@ -704,6 +805,10 @@ async function initializeDatabase() {
             await logHealth(_db, "turso");
             _initLogged = true;
           }
+          const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+          await ensureTelegramSchema2().catch(
+            (err) => console.warn("[Database] Telegram schema migration skipped:", err)
+          );
           return _db;
         }
       }
@@ -723,6 +828,10 @@ async function initializeDatabase() {
         await logHealth(_db, "mysql");
         _initLogged = true;
       }
+      const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+      await ensureTelegramSchema2().catch(
+        (err) => console.warn("[Database] Telegram schema migration skipped:", err)
+      );
       return _db;
     }
   }
@@ -739,6 +848,10 @@ async function initializeDatabase() {
           await logHealth(_db, "turso");
           _initLogged = true;
         }
+        const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+        await ensureTelegramSchema2().catch(
+          (err) => console.warn("[Database] Telegram schema migration skipped:", err)
+        );
         return _db;
       }
     } catch {
@@ -755,8 +868,38 @@ async function initializeDatabase() {
 async function getDb() {
   return initializeDatabase();
 }
+function getMysqlPool() {
+  return _mysqlPool;
+}
+var _db, _provider, _mysqlPool, _initLogged, users3, payments3, apiKeys3, systemPrompts3, applications3, aiModels3, systemSettings3, conversations3, messages3, externalApiTokens3, announcements3, botActivationTokens3, telegramLlmTurns3;
+var init_connection = __esm({
+  "server/db/connection.ts"() {
+    "use strict";
+    init_schema();
+    init_schema_mysql();
+    init_env();
+    _db = null;
+    _provider = null;
+    _mysqlPool = null;
+    _initLogged = false;
+    users3 = users;
+    payments3 = payments;
+    apiKeys3 = apiKeys;
+    systemPrompts3 = systemPrompts;
+    applications3 = applications;
+    aiModels3 = aiModels;
+    systemSettings3 = systemSettings;
+    conversations3 = conversations;
+    messages3 = messages;
+    externalApiTokens3 = externalApiTokens;
+    announcements3 = announcements;
+    botActivationTokens3 = botActivationTokens;
+    telegramLlmTurns3 = telegramLlmTurns;
+  }
+});
 
 // server/db.ts
+import { eq, and, desc, asc, sql as sql3, inArray } from "drizzle-orm";
 async function assertDatabase() {
   const database = await getDb();
   if (!database) {
@@ -834,7 +977,7 @@ async function getUsersByEmail(email) {
   const db = await getDb();
   if (!db) return [];
   const normalized = normalizeEmail(email);
-  return db.select().from(users3).where(sql2`lower(trim(${users3.email})) = ${normalized}`).orderBy(asc(users3.id));
+  return db.select().from(users3).where(sql3`lower(trim(${users3.email})) = ${normalized}`).orderBy(asc(users3.id));
 }
 async function getUserByEmail(email) {
   const matches = await getUsersByEmail(email);
@@ -1240,7 +1383,7 @@ async function getApplicationByEmail(email) {
   const db = await getDb();
   if (!db) return void 0;
   const normalized = normalizeEmail(email);
-  const result = await db.select().from(applications3).where(sql2`lower(trim(${applications3.email})) = ${normalized}`).orderBy(desc(applications3.createdAt)).limit(1);
+  const result = await db.select().from(applications3).where(sql3`lower(trim(${applications3.email})) = ${normalized}`).orderBy(desc(applications3.createdAt)).limit(1);
   return result[0];
 }
 async function getApprovedApplicationByEmail(email) {
@@ -1249,7 +1392,7 @@ async function getApprovedApplicationByEmail(email) {
   const normalized = normalizeEmail(email);
   const result = await db.select().from(applications3).where(
     and(
-      sql2`lower(trim(${applications3.email})) = ${normalized}`,
+      sql3`lower(trim(${applications3.email})) = ${normalized}`,
       eq(applications3.status, "approved")
     )
   ).orderBy(desc(applications3.createdAt)).limit(1);
@@ -1309,6 +1452,210 @@ async function deleteAnnouncement(id) {
   if (!db) throw new Error("Database not available");
   await db.delete(announcements3).where(eq(announcements3.id, id));
 }
+async function getUserByTelegramChatId(chatId) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const result = await db.select().from(users3).where(eq(users3.telegramChatId, chatId)).orderBy(desc(users3.updatedAt)).limit(1);
+  return result[0];
+}
+async function linkTelegramChat(userId, chatId) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users3).set({ telegramChatId: null }).where(eq(users3.telegramChatId, chatId));
+  await db.update(users3).set({ telegramChatId: chatId }).where(eq(users3.id, userId));
+}
+async function getActivationToken(token) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const result = await db.select().from(botActivationTokens3).where(eq(botActivationTokens3.token, token)).limit(1);
+  return result[0];
+}
+async function createBotActivationToken(userId, token) {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  const user = await getUserById(userId);
+  if (!user) throw new Error("User not found");
+  try {
+    const inserted = await database.insert(botActivationTokens3).values({ token, userId, isUsed: "false" }).returning();
+    if (inserted[0]) return inserted[0];
+  } catch (err) {
+    console.warn("[Database] bot_activation_tokens insert.returning failed, retrying:", err);
+  }
+  await database.insert(botActivationTokens3).values({ token, userId, isUsed: "false" });
+  const found = await database.select().from(botActivationTokens3).where(eq(botActivationTokens3.token, token)).limit(1);
+  if (!found[0]) throw new Error("Failed to create activation token");
+  return found[0];
+}
+async function markActivationTokenUsed(tokenId) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(botActivationTokens3).set({ isUsed: "true" }).where(eq(botActivationTokens3.id, tokenId));
+}
+function coerceTelegramMessageLimit(value) {
+  if (value == null) return 0;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
+}
+function isTelegramPlanActive(planExpiryDate) {
+  if (planExpiryDate == null || planExpiryDate === "") return true;
+  let ms;
+  if (planExpiryDate instanceof Date) {
+    ms = planExpiryDate.getTime();
+  } else if (typeof planExpiryDate === "number") {
+    ms = planExpiryDate;
+  } else {
+    const n = Number(planExpiryDate);
+    ms = Number.isFinite(n) ? n : NaN;
+  }
+  if (!Number.isFinite(ms)) return true;
+  if (ms > 0 && ms < 1e12) ms *= 1e3;
+  return ms > Date.now();
+}
+function clipTelegramTurnContent(text3) {
+  if (text3.length <= MAX_TELEGRAM_TURN_CHARS) return text3;
+  return `${text3.slice(0, MAX_TELEGRAM_TURN_CHARS)}
+\u2026`;
+}
+async function listRecentTelegramLlmTurnsForAdvisor(userId, advisor, maxMessages) {
+  const db = await getDb();
+  if (!db) return [];
+  const cap = Math.min(Math.max(1, maxMessages), MAX_TELEGRAM_LLM_TURNS);
+  try {
+    const rows = await db.select({
+      role: telegramLlmTurns3.role,
+      content: telegramLlmTurns3.content
+    }).from(telegramLlmTurns3).where(and(eq(telegramLlmTurns3.userId, userId), eq(telegramLlmTurns3.advisor, advisor))).orderBy(desc(telegramLlmTurns3.createdAt)).limit(cap);
+    return rows.reverse().filter((r) => r.role === "user" || r.role === "assistant").map((r) => ({
+      role: r.role,
+      content: r.content
+    }));
+  } catch (err) {
+    console.error("[db] listRecentTelegramLlmTurnsForAdvisor (telegram_llm_turns) failed:", err);
+    return [];
+  }
+}
+async function appendTelegramLlmTurnPair(userId, advisor, userContent, assistantContent) {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    const now = /* @__PURE__ */ new Date();
+    await db.insert(telegramLlmTurns3).values([
+      {
+        userId,
+        advisor,
+        role: "user",
+        content: clipTelegramTurnContent(userContent),
+        createdAt: now
+      },
+      {
+        userId,
+        advisor,
+        role: "assistant",
+        content: clipTelegramTurnContent(assistantContent),
+        createdAt: now
+      }
+    ]);
+    const ids = await db.select({ id: telegramLlmTurns3.id }).from(telegramLlmTurns3).where(and(eq(telegramLlmTurns3.userId, userId), eq(telegramLlmTurns3.advisor, advisor))).orderBy(desc(telegramLlmTurns3.createdAt));
+    const toDrop = ids.slice(MAX_TELEGRAM_LLM_TURNS);
+    if (toDrop.length === 0) return;
+    await db.delete(telegramLlmTurns3).where(
+      inArray(
+        telegramLlmTurns3.id,
+        toDrop.map((r) => r.id)
+      )
+    );
+  } catch (err) {
+    console.error("[db] appendTelegramLlmTurnPair (telegram_llm_turns) failed:", err);
+  }
+}
+async function listTelegramBotUsers() {
+  const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+  await ensureTelegramSchema2();
+  const all = await listAllUsers();
+  return all.map((u) => mapUserToTelegramRow(u)).sort((a, b) => b.id - a.id);
+}
+function mapUserToTelegramRow(user) {
+  let planExpiryDate = null;
+  if (user.planExpiryDate != null) {
+    const d = new Date(user.planExpiryDate);
+    if (!Number.isNaN(d.getTime())) {
+      planExpiryDate = d.toISOString();
+    }
+  }
+  return {
+    id: user.id,
+    email: user.email ?? null,
+    name: user.name ?? null,
+    telegramChatId: user.telegramChatId ?? null,
+    bizMessageLimit: user.bizMessageLimit ?? 5,
+    founderMessageLimit: user.founderMessageLimit ?? 5,
+    planTypeBiz: user.planTypeBiz ?? "free",
+    planTypeFounder: user.planTypeFounder ?? "free",
+    planExpiryDate
+  };
+}
+async function updateTelegramUserPlan(input) {
+  const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+  await ensureTelegramSchema2();
+  const db = await assertDatabase();
+  const user = await getUserById(input.userId);
+  if (!user) throw new Error("User not found");
+  const updateSet = { updatedAt: /* @__PURE__ */ new Date() };
+  if (input.planExpiryDate !== void 0) {
+    updateSet.planExpiryDate = input.planExpiryDate;
+  }
+  let bizLimit = user.bizMessageLimit ?? 0;
+  if (input.bizMessageLimit !== void 0) {
+    bizLimit = input.bizMessageLimit;
+  } else if (input.addBizMessages !== void 0) {
+    bizLimit = bizLimit + input.addBizMessages;
+  }
+  if (input.bizMessageLimit !== void 0 || input.addBizMessages !== void 0) {
+    updateSet.bizMessageLimit = Math.max(0, bizLimit);
+    if (bizLimit > 0 && (user.planTypeBiz ?? "free") === "free") {
+      updateSet.planTypeBiz = "starter";
+    }
+  }
+  let founderLimit = user.founderMessageLimit ?? 0;
+  if (input.founderMessageLimit !== void 0) {
+    founderLimit = input.founderMessageLimit;
+  } else if (input.addFounderMessages !== void 0) {
+    founderLimit = founderLimit + input.addFounderMessages;
+  }
+  if (input.founderMessageLimit !== void 0 || input.addFounderMessages !== void 0) {
+    updateSet.founderMessageLimit = Math.max(0, founderLimit);
+    if (founderLimit > 0 && (user.planTypeFounder ?? "free") === "free") {
+      updateSet.planTypeFounder = "starter";
+    }
+  }
+  await db.update(users3).set(updateSet).where(eq(users3.id, input.userId));
+}
+async function decrementTelegramMessageLimit(userId, advisor) {
+  const db = await getDb();
+  if (!db) return;
+  const user = await getUserById(userId);
+  if (!user) return;
+  if (advisor === "bizpilot") {
+    const newLimit = Math.max(0, (user.bizMessageLimit ?? 0) - 1);
+    await db.update(users3).set({ bizMessageLimit: newLimit }).where(eq(users3.id, userId));
+  } else {
+    const newLimit = Math.max(0, (user.founderMessageLimit ?? 0) - 1);
+    await db.update(users3).set({ founderMessageLimit: newLimit }).where(eq(users3.id, userId));
+  }
+}
+var MAX_TELEGRAM_LLM_TURNS, MAX_TELEGRAM_TURN_CHARS;
+var init_db = __esm({
+  "server/db.ts"() {
+    "use strict";
+    init_env();
+    init_adminAccess();
+    init_userStatus();
+    init_connection();
+    MAX_TELEGRAM_LLM_TURNS = 40;
+    MAX_TELEGRAM_TURN_CHARS = 12e3;
+  }
+});
 
 // server/_core/cookies.ts
 function isSecureRequest(req) {
@@ -1326,13 +1673,13 @@ function getSessionCookieOptions(req) {
     secure: isSecureRequest(req)
   };
 }
-
-// server/_core/oauth.ts
-init_env();
+var init_cookies = __esm({
+  "server/_core/cookies.ts"() {
+    "use strict";
+  }
+});
 
 // server/_core/googleLogin.ts
-init_env();
-init_userStatus();
 async function resolveGoogleLogin(userInfo) {
   const googleSub = userInfo.sub;
   const userEmail = userInfo.email ? normalizeEmail(userInfo.email) : null;
@@ -1400,119 +1747,140 @@ async function resolveGoogleLogin(userInfo) {
     upsert
   };
 }
+var init_googleLogin = __esm({
+  "server/_core/googleLogin.ts"() {
+    "use strict";
+    init_db();
+    init_adminAccess();
+    init_env();
+    init_userStatus();
+  }
+});
 
 // shared/_core/errors.ts
-var HttpError = class extends Error {
-  constructor(statusCode, message) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "HttpError";
+var HttpError, ForbiddenError;
+var init_errors = __esm({
+  "shared/_core/errors.ts"() {
+    "use strict";
+    HttpError = class extends Error {
+      constructor(statusCode, message) {
+        super(message);
+        this.statusCode = statusCode;
+        this.name = "HttpError";
+      }
+    };
+    ForbiddenError = (msg) => new HttpError(403, msg);
   }
-};
-var ForbiddenError = (msg) => new HttpError(403, msg);
+});
 
 // server/_core/sdk.ts
 import { parse as parseCookieHeader } from "cookie";
 import { SignJWT, jwtVerify } from "jose";
-init_userStatus();
-init_env();
-var isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
-var SessionService = class {
-  parseCookies(cookieHeader) {
-    if (!cookieHeader) {
-      return /* @__PURE__ */ new Map();
-    }
-    const parsed = parseCookieHeader(cookieHeader);
-    return new Map(Object.entries(parsed));
-  }
-  getSessionSecret() {
-    const secret = typeof process.env.JWT_SECRET === "string" && process.env.JWT_SECRET.trim() || ENV.cookieSecret;
-    if (!secret) {
-      throw new Error("JWT_SECRET is not configured");
-    }
-    return new TextEncoder().encode(secret);
-  }
-  async createSessionToken(openId, options = {}) {
-    return this.signSession(
-      {
-        openId,
-        appId: ENV.googleClientId,
-        name: options.name || ""
-      },
-      options
-    );
-  }
-  async signSession(payload, options = {}) {
-    const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
-    const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1e3);
-    const secretKey = this.getSessionSecret();
-    return new SignJWT({
-      openId: payload.openId,
-      appId: payload.appId,
-      name: payload.name
-    }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
-  }
-  async verifySession(cookieValue) {
-    if (!cookieValue) {
-      console.warn("[Auth] Missing session cookie");
-      return null;
-    }
-    try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secretKey, {
-        algorithms: ["HS256"]
-      });
-      const { openId, appId, name } = payload;
-      if (!isNonEmptyString(openId) || !isNonEmptyString(appId)) {
-        console.warn("[Auth] Session payload missing required fields");
-        return null;
+var isNonEmptyString, SessionService, sdk;
+var init_sdk = __esm({
+  "server/_core/sdk.ts"() {
+    "use strict";
+    init_const();
+    init_errors();
+    init_db();
+    init_adminAccess();
+    init_userStatus();
+    init_env();
+    isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
+    SessionService = class {
+      parseCookies(cookieHeader) {
+        if (!cookieHeader) {
+          return /* @__PURE__ */ new Map();
+        }
+        const parsed = parseCookieHeader(cookieHeader);
+        return new Map(Object.entries(parsed));
       }
-      if (!ENV.googleClientId || appId !== ENV.googleClientId) {
-        console.warn("[Auth] Session appId does not match configured Google client");
-        return null;
+      getSessionSecret() {
+        const secret = typeof process.env.JWT_SECRET === "string" && process.env.JWT_SECRET.trim() || ENV.cookieSecret;
+        if (!secret) {
+          throw new Error("JWT_SECRET is not configured");
+        }
+        return new TextEncoder().encode(secret);
       }
-      return { openId, appId, name };
-    } catch (error) {
-      console.warn("[Auth] Session verification failed", String(error));
-      return null;
-    }
+      async createSessionToken(openId, options = {}) {
+        return this.signSession(
+          {
+            openId,
+            appId: ENV.googleClientId,
+            name: options.name || ""
+          },
+          options
+        );
+      }
+      async signSession(payload, options = {}) {
+        const issuedAt = Date.now();
+        const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+        const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1e3);
+        const secretKey = this.getSessionSecret();
+        return new SignJWT({
+          openId: payload.openId,
+          appId: payload.appId,
+          name: payload.name
+        }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
+      }
+      async verifySession(cookieValue) {
+        if (!cookieValue) {
+          console.warn("[Auth] Missing session cookie");
+          return null;
+        }
+        try {
+          const secretKey = this.getSessionSecret();
+          const { payload } = await jwtVerify(cookieValue, secretKey, {
+            algorithms: ["HS256"]
+          });
+          const { openId, appId, name } = payload;
+          if (!isNonEmptyString(openId) || !isNonEmptyString(appId)) {
+            console.warn("[Auth] Session payload missing required fields");
+            return null;
+          }
+          if (!ENV.googleClientId || appId !== ENV.googleClientId) {
+            console.warn("[Auth] Session appId does not match configured Google client");
+            return null;
+          }
+          return { openId, appId, name };
+        } catch (error) {
+          console.warn("[Auth] Session verification failed", String(error));
+          return null;
+        }
+      }
+      async authenticateRequest(req) {
+        const cookies = this.parseCookies(req.headers.cookie);
+        const sessionCookie = cookies.get(COOKIE_NAME);
+        const session = await this.verifySession(sessionCookie);
+        if (!session) {
+          throw ForbiddenError("Invalid session cookie");
+        }
+        const signedInAt = /* @__PURE__ */ new Date();
+        let user = await getUserByOpenId(session.openId);
+        if (!user) {
+          throw ForbiddenError("User not found");
+        }
+        if (user.email && isAdminEmail(user.email) && user.role !== "admin") {
+          await updateUserRole(user.id, "admin");
+          user = { ...user, role: "admin" };
+        }
+        const upsertStatus = isUserApproved(user) && user.status?.toLowerCase() !== "active" ? "active" : void 0;
+        await upsertUser({
+          openId: user.openId,
+          email: user.email,
+          lastSignedIn: signedInAt,
+          role: user.role === "admin" ? "admin" : void 0,
+          ...upsertStatus ? { status: upsertStatus } : {}
+        });
+        return user;
+      }
+    };
+    sdk = new SessionService();
   }
-  async authenticateRequest(req) {
-    const cookies = this.parseCookies(req.headers.cookie);
-    const sessionCookie = cookies.get(COOKIE_NAME);
-    const session = await this.verifySession(sessionCookie);
-    if (!session) {
-      throw ForbiddenError("Invalid session cookie");
-    }
-    const signedInAt = /* @__PURE__ */ new Date();
-    let user = await getUserByOpenId(session.openId);
-    if (!user) {
-      throw ForbiddenError("User not found");
-    }
-    if (user.email && isAdminEmail(user.email) && user.role !== "admin") {
-      await updateUserRole(user.id, "admin");
-      user = { ...user, role: "admin" };
-    }
-    const upsertStatus = isUserApproved(user) && user.status?.toLowerCase() !== "active" ? "active" : void 0;
-    await upsertUser({
-      openId: user.openId,
-      email: user.email,
-      lastSignedIn: signedInAt,
-      role: user.role === "admin" ? "admin" : void 0,
-      ...upsertStatus ? { status: upsertStatus } : {}
-    });
-    return user;
-  }
-};
-var sdk = new SessionService();
+});
 
 // server/_core/oauth.ts
-var GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state";
-var GOOGLE_OAUTH_REDIRECT_COOKIE = "google_oauth_redirect_uri";
-var GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
-var GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-var GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 function getQueryParam(req, key) {
   const value = req.query[key];
   return typeof value === "string" ? value : void 0;
@@ -1855,316 +2223,25 @@ function registerOAuthRoutes(app2) {
     }
   });
 }
-
-// server/_core/storageProxy.ts
-init_env();
-function registerStorageProxy(app2) {
-  app2.get("/manus-storage/*", async (req, res) => {
-    const key = req.params["0"];
-    if (!key) {
-      res.status(400).send("Missing storage key");
-      return;
-    }
-    if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
-      res.status(500).send("Storage proxy not configured");
-      return;
-    }
-    try {
-      const forgeUrl = new URL(
-        "v1/storage/presign/get",
-        ENV.forgeApiUrl.replace(/\/+$/, "") + "/"
-      );
-      forgeUrl.searchParams.set("path", key);
-      const forgeResp = await fetch(forgeUrl, {
-        headers: { Authorization: `Bearer ${ENV.forgeApiKey}` }
-      });
-      if (!forgeResp.ok) {
-        const body = await forgeResp.text().catch(() => "");
-        console.error(`[StorageProxy] forge error: ${forgeResp.status} ${body}`);
-        res.status(502).send("Storage backend error");
-        return;
-      }
-      const { url } = await forgeResp.json();
-      if (!url) {
-        res.status(502).send("Empty signed URL from backend");
-        return;
-      }
-      res.set("Cache-Control", "no-store");
-      res.redirect(307, url);
-    } catch (err) {
-      console.error("[StorageProxy] failed:", err);
-      res.status(502).send("Storage proxy error");
-    }
-  });
-}
-
-// server/_core/systemRouter.ts
-import { z } from "zod";
-
-// server/_core/notification.ts
-init_env();
-import { TRPCError } from "@trpc/server";
-var TITLE_MAX_LENGTH = 1200;
-var CONTENT_MAX_LENGTH = 2e4;
-var trimValue = (value) => value.trim();
-var isNonEmptyString2 = (value) => typeof value === "string" && value.trim().length > 0;
-var buildEndpointUrl = (baseUrl) => {
-  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  return new URL(
-    "webdevtoken.v1.WebDevService/SendNotification",
-    normalizedBase
-  ).toString();
-};
-var validatePayload = (input) => {
-  if (!isNonEmptyString2(input.title)) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Notification title is required."
-    });
+var GOOGLE_OAUTH_STATE_COOKIE, GOOGLE_OAUTH_REDIRECT_COOKIE, GOOGLE_AUTH_ENDPOINT, GOOGLE_TOKEN_URL, GOOGLE_USERINFO_URL;
+var init_oauth = __esm({
+  "server/_core/oauth.ts"() {
+    "use strict";
+    init_const();
+    init_db();
+    init_cookies();
+    init_env();
+    init_googleLogin();
+    init_sdk();
+    GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state";
+    GOOGLE_OAUTH_REDIRECT_COOKIE = "google_oauth_redirect_uri";
+    GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
+    GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+    GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
   }
-  if (!isNonEmptyString2(input.content)) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Notification content is required."
-    });
-  }
-  const title = trimValue(input.title);
-  const content = trimValue(input.content);
-  if (title.length > TITLE_MAX_LENGTH) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `Notification title must be at most ${TITLE_MAX_LENGTH} characters.`
-    });
-  }
-  if (content.length > CONTENT_MAX_LENGTH) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `Notification content must be at most ${CONTENT_MAX_LENGTH} characters.`
-    });
-  }
-  return { title, content };
-};
-async function notifyOwner(payload) {
-  const { title, content } = validatePayload(payload);
-  if (!ENV.forgeApiUrl) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Notification service URL is not configured."
-    });
-  }
-  if (!ENV.forgeApiKey) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Notification service API key is not configured."
-    });
-  }
-  const endpoint = buildEndpointUrl(ENV.forgeApiUrl);
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${ENV.forgeApiKey}`,
-        "content-type": "application/json",
-        "connect-protocol-version": "1"
-      },
-      body: JSON.stringify({ title, content })
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      console.warn(
-        `[Notification] Failed to notify owner (${response.status} ${response.statusText})${detail ? `: ${detail}` : ""}`
-      );
-      return false;
-    }
-    return true;
-  } catch (error) {
-    console.warn("[Notification] Error calling notification service:", error);
-    return false;
-  }
-}
-
-// server/_core/trpc.ts
-init_userStatus();
-import { initTRPC, TRPCError as TRPCError2 } from "@trpc/server";
-import superjson from "superjson";
-var t = initTRPC.context().create({
-  transformer: superjson
 });
-var router = t.router;
-var publicProcedure = t.procedure;
-var requireUser = t.middleware(async (opts) => {
-  const { ctx, next } = opts;
-  if (!ctx.user) {
-    throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
-  }
-  return next({
-    ctx: {
-      ...ctx,
-      user: ctx.user
-    }
-  });
-});
-var protectedProcedure = t.procedure.use(requireUser);
-var requireApproved = t.middleware(async (opts) => {
-  const { ctx, next } = opts;
-  if (!ctx.user) {
-    throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
-  }
-  if (!isUserApproved(ctx.user) && isPendingUserStatus(ctx.user.status)) {
-    throw new TRPCError2({ code: "FORBIDDEN", message: "Your account is pending admin approval." });
-  }
-  return next({ ctx: { ...ctx, user: ctx.user } });
-});
-var approvedProcedure = t.procedure.use(requireApproved);
-var adminProcedure = t.procedure.use(
-  t.middleware(async (opts) => {
-    const { ctx, next } = opts;
-    if (!ctx.user || ctx.user.role !== "admin") {
-      throw new TRPCError2({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
-    }
-    return next({
-      ctx: {
-        ...ctx,
-        user: ctx.user
-      }
-    });
-  })
-);
-
-// server/_core/systemRouter.ts
-var systemRouter = router({
-  health: publicProcedure.input(
-    z.object({
-      timestamp: z.number().min(0, "timestamp cannot be negative")
-    })
-  ).query(() => ({
-    ok: true
-  })),
-  notifyOwner: adminProcedure.input(
-    z.object({
-      title: z.string().min(1, "title is required"),
-      content: z.string().min(1, "content is required")
-    })
-  ).mutation(async ({ input }) => {
-    const delivered = await notifyOwner(input);
-    return {
-      success: delivered
-    };
-  })
-});
-
-// server/routers.ts
-import { z as z2 } from "zod";
-import { TRPCError as TRPCError3 } from "@trpc/server";
 
 // server/_core/llm.ts
-init_env();
-var ensureArray = (value) => Array.isArray(value) ? value : [value];
-var normalizeContentPart = (part) => {
-  if (typeof part === "string") {
-    return { type: "text", text: part };
-  }
-  if (part.type === "text") {
-    return part;
-  }
-  if (part.type === "image_url") {
-    return part;
-  }
-  if (part.type === "file_url") {
-    return part;
-  }
-  throw new Error("Unsupported message content part");
-};
-var normalizeMessage = (message) => {
-  const { role, name, tool_call_id } = message;
-  if (role === "tool" || role === "function") {
-    const content = ensureArray(message.content).map((part) => typeof part === "string" ? part : JSON.stringify(part)).join("\n");
-    return {
-      role,
-      name,
-      tool_call_id,
-      content
-    };
-  }
-  const contentParts = ensureArray(message.content).map(normalizeContentPart);
-  if (contentParts.length === 1 && contentParts[0].type === "text") {
-    return {
-      role,
-      name,
-      content: contentParts[0].text
-    };
-  }
-  return {
-    role,
-    name,
-    content: contentParts
-  };
-};
-var normalizeToolChoice = (toolChoice, tools) => {
-  if (!toolChoice) return void 0;
-  if (toolChoice === "none" || toolChoice === "auto") {
-    return toolChoice;
-  }
-  if (toolChoice === "required") {
-    if (!tools || tools.length === 0) {
-      throw new Error(
-        "tool_choice 'required' was provided but no tools were configured"
-      );
-    }
-    if (tools.length > 1) {
-      throw new Error(
-        "tool_choice 'required' needs a single tool or specify the tool name explicitly"
-      );
-    }
-    return {
-      type: "function",
-      function: { name: tools[0].function.name }
-    };
-  }
-  if ("name" in toolChoice) {
-    return {
-      type: "function",
-      function: { name: toolChoice.name }
-    };
-  }
-  return toolChoice;
-};
-var resolveApiUrl = () => ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0 ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions` : "https://forge.manus.im/v1/chat/completions";
-var assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
-};
-var normalizeResponseFormat = ({
-  responseFormat,
-  response_format,
-  outputSchema,
-  output_schema
-}) => {
-  const explicitFormat = responseFormat || response_format;
-  if (explicitFormat) {
-    if (explicitFormat.type === "json_schema" && !explicitFormat.json_schema?.schema) {
-      throw new Error(
-        "responseFormat json_schema requires a defined schema object"
-      );
-    }
-    return explicitFormat;
-  }
-  const schema = outputSchema || output_schema;
-  if (!schema) return void 0;
-  if (!schema.name || !schema.schema) {
-    throw new Error("outputSchema requires both name and schema");
-  }
-  return {
-    type: "json_schema",
-    json_schema: {
-      name: schema.name,
-      schema: schema.schema,
-      ...typeof schema.strict === "boolean" ? { strict: schema.strict } : {}
-    }
-  };
-};
 async function invokeLLM(params) {
   assertApiKey();
   const {
@@ -2220,10 +2297,120 @@ async function invokeLLM(params) {
   }
   return await response.json();
 }
+var ensureArray, normalizeContentPart, normalizeMessage, normalizeToolChoice, resolveApiUrl, assertApiKey, normalizeResponseFormat;
+var init_llm = __esm({
+  "server/_core/llm.ts"() {
+    "use strict";
+    init_env();
+    ensureArray = (value) => Array.isArray(value) ? value : [value];
+    normalizeContentPart = (part) => {
+      if (typeof part === "string") {
+        return { type: "text", text: part };
+      }
+      if (part.type === "text") {
+        return part;
+      }
+      if (part.type === "image_url") {
+        return part;
+      }
+      if (part.type === "file_url") {
+        return part;
+      }
+      throw new Error("Unsupported message content part");
+    };
+    normalizeMessage = (message) => {
+      const { role, name, tool_call_id } = message;
+      if (role === "tool" || role === "function") {
+        const content = ensureArray(message.content).map((part) => typeof part === "string" ? part : JSON.stringify(part)).join("\n");
+        return {
+          role,
+          name,
+          tool_call_id,
+          content
+        };
+      }
+      const contentParts = ensureArray(message.content).map(normalizeContentPart);
+      if (contentParts.length === 1 && contentParts[0].type === "text") {
+        return {
+          role,
+          name,
+          content: contentParts[0].text
+        };
+      }
+      return {
+        role,
+        name,
+        content: contentParts
+      };
+    };
+    normalizeToolChoice = (toolChoice, tools) => {
+      if (!toolChoice) return void 0;
+      if (toolChoice === "none" || toolChoice === "auto") {
+        return toolChoice;
+      }
+      if (toolChoice === "required") {
+        if (!tools || tools.length === 0) {
+          throw new Error(
+            "tool_choice 'required' was provided but no tools were configured"
+          );
+        }
+        if (tools.length > 1) {
+          throw new Error(
+            "tool_choice 'required' needs a single tool or specify the tool name explicitly"
+          );
+        }
+        return {
+          type: "function",
+          function: { name: tools[0].function.name }
+        };
+      }
+      if ("name" in toolChoice) {
+        return {
+          type: "function",
+          function: { name: toolChoice.name }
+        };
+      }
+      return toolChoice;
+    };
+    resolveApiUrl = () => ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0 ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions` : "https://forge.manus.im/v1/chat/completions";
+    assertApiKey = () => {
+      if (!ENV.forgeApiKey) {
+        throw new Error("OPENAI_API_KEY is not configured");
+      }
+    };
+    normalizeResponseFormat = ({
+      responseFormat,
+      response_format,
+      outputSchema,
+      output_schema
+    }) => {
+      const explicitFormat = responseFormat || response_format;
+      if (explicitFormat) {
+        if (explicitFormat.type === "json_schema" && !explicitFormat.json_schema?.schema) {
+          throw new Error(
+            "responseFormat json_schema requires a defined schema object"
+          );
+        }
+        return explicitFormat;
+      }
+      const schema = outputSchema || output_schema;
+      if (!schema) return void 0;
+      if (!schema.name || !schema.schema) {
+        throw new Error("outputSchema requires both name and schema");
+      }
+      return {
+        type: "json_schema",
+        json_schema: {
+          name: schema.name,
+          schema: schema.schema,
+          ...typeof schema.strict === "boolean" ? { strict: schema.strict } : {}
+        }
+      };
+    };
+  }
+});
 
 // server/llmWithApiKey.ts
-var TEMPERATURE = 0.3;
-var MAX_OUTPUT_TOKENS = 4096;
 async function invokeAdvisorLLM(advisorSlug, messages4) {
   const aiModel = await getAiModel(advisorSlug);
   const modelString = aiModel?.modelString ?? "gemini-2.5-pro-preview-05-06";
@@ -2363,6 +2550,836 @@ ${msg.content}`;
     }
   }
   return result;
+}
+var TEMPERATURE, MAX_OUTPUT_TOKENS;
+var init_llmWithApiKey = __esm({
+  "server/llmWithApiKey.ts"() {
+    "use strict";
+    init_db();
+    init_llm();
+    TEMPERATURE = 0.3;
+    MAX_OUTPUT_TOKENS = 4096;
+  }
+});
+
+// shared/telegramConfig.ts
+var telegramConfig_exports = {};
+__export(telegramConfig_exports, {
+  TELEGRAM_BOT_USERNAME_PLACEHOLDER: () => TELEGRAM_BOT_USERNAME_PLACEHOLDER,
+  buildTelegramStartLink: () => buildTelegramStartLink,
+  isTelegramBotUsernameConfigured: () => isTelegramBotUsernameConfigured,
+  normalizeTelegramBotUsername: () => normalizeTelegramBotUsername,
+  resolveTelegramBizBotUsername: () => resolveTelegramBizBotUsername,
+  resolveTelegramFounderBotUsername: () => resolveTelegramFounderBotUsername
+});
+function normalizeTelegramBotUsername(raw) {
+  return (raw ?? "").trim().replace(/^@/, "");
+}
+function resolveTelegramBizBotUsername(env) {
+  const username = normalizeTelegramBotUsername(env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME) || normalizeTelegramBotUsername(env.VITE_TELEGRAM_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_BIZPILOT_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_BIZ_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_BOT_USERNAME) || "";
+  return username || TELEGRAM_BOT_USERNAME_PLACEHOLDER;
+}
+function resolveTelegramFounderBotUsername(env) {
+  const username = normalizeTelegramBotUsername(env.NEXT_PUBLIC_TELEGRAM_FOUNDER_BOT_USERNAME) || normalizeTelegramBotUsername(env.VITE_TELEGRAM_FOUNDER_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_FOUNDERPILOT_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_FOUNDER_BOT_USERNAME) || "";
+  return username || null;
+}
+function isTelegramBotUsernameConfigured(username) {
+  return Boolean(username) && username !== TELEGRAM_BOT_USERNAME_PLACEHOLDER;
+}
+function buildTelegramStartLink(token, botUsername) {
+  const user = normalizeTelegramBotUsername(botUsername) || TELEGRAM_BOT_USERNAME_PLACEHOLDER;
+  return `https://t.me/${user}?start=${token}`;
+}
+var TELEGRAM_BOT_USERNAME_PLACEHOLDER;
+var init_telegramConfig = __esm({
+  "shared/telegramConfig.ts"() {
+    "use strict";
+    TELEGRAM_BOT_USERNAME_PLACEHOLDER = "YOUR_BOT_USERNAME";
+  }
+});
+
+// server/telegram.ts
+var telegram_exports = {};
+__export(telegram_exports, {
+  TELEGRAM_BOT_USERNAME_PLACEHOLDER: () => TELEGRAM_BOT_USERNAME_PLACEHOLDER,
+  buildTelegramActivationLink: () => buildTelegramActivationLink,
+  generateTelegramActivationToken: () => generateTelegramActivationToken,
+  getTelegramBizBotUsername: () => getTelegramBizBotUsername,
+  getTelegramBotToken: () => getTelegramBotToken,
+  getTelegramFounderBotUsername: () => getTelegramFounderBotUsername,
+  registerTelegramRoutes: () => registerTelegramRoutes,
+  resolveWebhookBaseUrl: () => resolveWebhookBaseUrl,
+  setupTelegramWebhook: () => setupTelegramWebhook
+});
+import { nanoid } from "nanoid";
+function getTelegramBotToken(advisor) {
+  if (advisor === "bizpilot") {
+    return process.env.TELEGRAM_BIZPILOT_TOKEN?.trim() || process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim();
+  }
+  return process.env.TELEGRAM_FOUNDERPILOT_TOKEN?.trim() || process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim();
+}
+function normalizeAdvisorSlug(raw) {
+  const r = raw?.toLowerCase().trim();
+  if (r === "founderpilot") return "founderpilot";
+  return "bizpilot";
+}
+function extractAdvisorQuery(req) {
+  try {
+    const pathWithQuery = req.originalUrl ?? req.url ?? "";
+    if (pathWithQuery) {
+      const absolute = pathWithQuery.startsWith("http://") || pathWithQuery.startsWith("https://") ? pathWithQuery : `http://internal${pathWithQuery.startsWith("/") ? "" : "/"}${pathWithQuery}`;
+      const advisorParam = new URL(absolute).searchParams.get("advisor");
+      if (advisorParam?.trim()) return advisorParam.trim();
+    }
+  } catch (err) {
+    console.warn("[Telegram] extractAdvisorQuery failed:", err);
+  }
+  const q = req.query?.advisor;
+  if (typeof q === "string" && q.trim()) return q.trim();
+  if (Array.isArray(q) && typeof q[0] === "string" && q[0].trim()) return q[0].trim();
+  return void 0;
+}
+function parseAdvisor(req) {
+  return normalizeAdvisorSlug(extractAdvisorQuery(req));
+}
+function parseStartToken(text3) {
+  const trimmed = text3.trim();
+  if (!trimmed.startsWith("/start")) return null;
+  const parts = trimmed.split(/\s+/);
+  if (parts.length < 2) return null;
+  return parts[1].replace(/^@/, "").trim() || null;
+}
+function isBareStartCommand(text3) {
+  return /^\s*\/start(?:@[\w_]+)?\s*$/i.test(text3.trim());
+}
+function extractChatId(update) {
+  const id = update?.message?.chat?.id;
+  return id != null ? String(id) : void 0;
+}
+async function sendTelegramMessage(botToken, chatId, text3) {
+  try {
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: text3,
+        reply_markup: PERSISTENT_REPLY_KEYBOARD
+      })
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      console.error("[Telegram] sendMessage failed:", response.status, body);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[Telegram] sendMessage error:", err);
+    return false;
+  }
+}
+async function sendTypingChatAction(botToken, chatId) {
+  try {
+    const url = `https://api.telegram.org/bot${botToken}/sendChatAction`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, action: "typing" })
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn("[Telegram] sendChatAction typing failed:", response.status, body);
+    }
+  } catch (err) {
+    console.warn("[Telegram] sendChatAction error:", err);
+  }
+}
+async function handleStartLink(chatId, token, botToken) {
+  const activation = await getActivationToken(token);
+  if (!activation || activation.isUsed === "true") {
+    await sendTelegramMessage(botToken, chatId, INVALID_TOKEN_MSG);
+    return;
+  }
+  const user = await getUserById(activation.userId);
+  if (!user) {
+    await sendTelegramMessage(botToken, chatId, INVALID_TOKEN_MSG);
+    return;
+  }
+  await linkTelegramChat(user.id, chatId);
+  await markActivationTokenUsed(activation.id);
+  await sendTelegramMessage(botToken, chatId, LINK_SUCCESS_MSG);
+}
+async function handleChatMessage(chatId, userText, advisorSlug, advisorQuery, botToken) {
+  const user = await safeGetUserByTelegramChatId(chatId);
+  if (!user) {
+    await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
+    return;
+  }
+  const isBiz = advisorSlug === "bizpilot";
+  const currentLimit = coerceTelegramMessageLimit(
+    isBiz ? user.bizMessageLimit : user.founderMessageLimit
+  );
+  const isExpired = !isTelegramPlanActive(user.planExpiryDate ?? null);
+  console.log("Credit check:", {
+    userId: user.id,
+    advisorQuery,
+    advisorSlug,
+    isBiz,
+    currentLimit,
+    bizMessageLimit: user.bizMessageLimit,
+    founderMessageLimit: user.founderMessageLimit,
+    expiry: user.planExpiryDate,
+    isExpired
+  });
+  if (currentLimit <= 0 || isExpired) {
+    console.log("[Telegram] Credit check failed \u2014 denying access", {
+      userId: user.id,
+      advisorQuery,
+      advisorSlug,
+      currentLimit,
+      isExpired
+    });
+    await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
+    return;
+  }
+  const systemPrompt = await getActiveSystemPrompt(advisorSlug);
+  const fallback = advisorSlug === "bizpilot" ? "You are BizPilot, an expert business advisor for Myanmar businesses." : "You are FounderPilot, a strategic advisor for founders and CEOs.";
+  const profileCtx = [
+    `
+
+[User Profile]`,
+    `- Name: ${user.name ?? "Unknown"}`,
+    user.businessName ? `- Business Name: ${user.businessName}` : null,
+    user.businessType ? `- Business Type: ${user.businessType}` : null,
+    user.useCase ? `- How they use PilotHub: ${user.useCase}` : null,
+    `- Channel: Telegram (${advisorSlug})`
+  ].filter(Boolean).join("\n");
+  const history = await listRecentTelegramLlmTurnsForAdvisor(user.id, advisorSlug, 40);
+  const llmMessages = [
+    { role: "system", content: (systemPrompt || fallback) + profileCtx },
+    ...history.map((h) => ({ role: h.role, content: h.content })),
+    { role: "user", content: userText }
+  ];
+  void sendTypingChatAction(botToken, chatId).catch(() => {
+  });
+  let reply;
+  try {
+    reply = await invokeAdvisorLLM(advisorSlug, llmMessages);
+  } catch (err) {
+    console.error("[Telegram] LLM error:", err);
+    await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
+    return;
+  }
+  const sent = await sendTelegramMessage(botToken, chatId, reply);
+  if (!sent) {
+    console.error("[Telegram] Gemini reply was not delivered; limit not decremented", {
+      userId: user.id,
+      advisorSlug
+    });
+    return;
+  }
+  await appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+  await decrementTelegramMessageLimit(user.id, advisorSlug);
+  console.log("[Telegram] Message limit decremented after successful delivery", {
+    userId: user.id,
+    advisorSlug,
+    isBiz
+  });
+}
+async function safeGetUserByTelegramChatId(chatId) {
+  try {
+    return await getUserByTelegramChatId(chatId);
+  } catch (err) {
+    console.error("[Telegram] getUserByTelegramChatId failed:", err);
+    return void 0;
+  }
+}
+async function handleBareStart(chatId, botToken) {
+  const user = await safeGetUserByTelegramChatId(chatId);
+  if (!user) {
+    await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
+    return;
+  }
+  await sendTelegramMessage(botToken, chatId, ALREADY_LINKED_MSG);
+}
+async function processUpdate(update, advisorSlug, advisorQuery, botToken) {
+  const message = update?.message;
+  if (!message?.text) {
+    console.log("[Telegram] Ignoring update without text message");
+    return;
+  }
+  const chatId = String(message.chat.id);
+  const text3 = message.text;
+  if (isBareStartCommand(text3)) {
+    await handleBareStart(chatId, botToken);
+    return;
+  }
+  const startToken = parseStartToken(text3);
+  if (startToken) {
+    await handleStartLink(chatId, startToken, botToken);
+    return;
+  }
+  if (text3.startsWith("/")) {
+    console.log("[Telegram] Ignoring unhandled command:", text3.slice(0, 32));
+    return;
+  }
+  await handleChatMessage(chatId, text3, advisorSlug, advisorQuery, botToken);
+}
+function registerTelegramRoutes(app2) {
+  app2.post("/api/telegram/webhook", async (req, res) => {
+    console.log("Received Telegram message:", req.body);
+    let botToken;
+    let chatId;
+    try {
+      const body = req.body;
+      if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
+        await ensureTelegramSchema();
+        const advisorQuery2 = extractAdvisorQuery(req);
+        const advisor2 = parseAdvisor(req);
+        console.log("[Telegram] Contact tap advisor:", { advisorQuery: advisorQuery2, advisor: advisor2 });
+        botToken = getTelegramBotToken(advisor2);
+        chatId = body.message.chat?.id != null ? String(body.message.chat.id) : void 0;
+        if (botToken && chatId) {
+          await sendTelegramMessage(botToken, chatId, CONTACT_TEAM_REPLY_MSG);
+        } else if (!botToken) {
+          console.error(
+            `[Telegram] No bot token for ${advisor2}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`
+          );
+        }
+        return;
+      }
+      await ensureTelegramSchema();
+      const advisorQuery = extractAdvisorQuery(req);
+      const advisor = parseAdvisor(req);
+      console.log("[Telegram] Webhook advisor:", { advisorQuery, advisor });
+      botToken = getTelegramBotToken(advisor);
+      if (!botToken) {
+        console.error(
+          `[Telegram] No bot token for ${advisor}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`
+        );
+        return;
+      }
+      const update = req.body ?? {};
+      chatId = extractChatId(update);
+      await processUpdate(update, advisor, advisorQuery, botToken);
+    } catch (err) {
+      console.error("[Telegram] Webhook processing error:", err);
+      if (botToken && chatId) {
+        try {
+          await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
+        } catch (sendErr) {
+          console.error("[Telegram] Failed to send error reply:", sendErr);
+        }
+      }
+    } finally {
+      res.status(200).json({ ok: true });
+    }
+  });
+}
+function getTelegramBizBotUsername() {
+  return resolveTelegramBizBotUsername(process.env);
+}
+function getTelegramFounderBotUsername() {
+  return resolveTelegramFounderBotUsername(process.env);
+}
+function buildTelegramActivationLink(token, botUsername) {
+  const username = botUsername?.trim().replace(/^@/, "") || getTelegramBizBotUsername();
+  return buildTelegramStartLink(token, username);
+}
+function resolveWebhookBaseUrl(req) {
+  const explicit = process.env.WEBHOOK_BASE_URL?.trim() || process.env.PUBLIC_APP_URL?.trim();
+  if (explicit) {
+    try {
+      return new URL(explicit).origin;
+    } catch {
+      console.warn("[Telegram] WEBHOOK_BASE_URL / PUBLIC_APP_URL invalid:", explicit);
+    }
+  }
+  if (req) {
+    return getPublicOrigin(req);
+  }
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) {
+    const host = vercel.replace(/^https?:\/\//i, "");
+    return `https://${host}`;
+  }
+  throw new Error(
+    "Cannot determine public URL. Set WEBHOOK_BASE_URL or PUBLIC_APP_URL (e.g. https://your-domain.com)"
+  );
+}
+function assertPublicWebhookBaseUrl(baseUrl) {
+  let host = "";
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    throw new Error(`Invalid webhook base URL: ${baseUrl}`);
+  }
+  if (host.endsWith("-projects.vercel.app")) {
+    throw new Error(
+      `Webhook base URL must be your production domain (e.g. https://pilothub.vip), not a Vercel preview URL (${host}). Set PUBLIC_APP_URL=https://pilothub.vip in Vercel env, then run Setup Bot from the live admin panel.`
+    );
+  }
+}
+async function setupTelegramWebhook(advisor, baseUrl) {
+  const botToken = getTelegramBotToken(advisor);
+  if (!botToken) {
+    throw new Error(
+      advisor === "bizpilot" ? "TELEGRAM_BIZPILOT_TOKEN is not set in environment" : "TELEGRAM_FOUNDERPILOT_TOKEN is not set in environment"
+    );
+  }
+  assertPublicWebhookBaseUrl(baseUrl);
+  const webhookUrl = `${baseUrl.replace(/\/$/, "")}/api/telegram/webhook?advisor=${advisor}`;
+  const apiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true })
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok) {
+    throw new Error(data.description ?? `Telegram setWebhook failed (${response.status})`);
+  }
+  console.info("[Telegram] Webhook registered", { advisor, webhookUrl });
+  return { ok: true, webhookUrl, description: data.description };
+}
+async function generateTelegramActivationToken(userId, botUsername) {
+  await ensureTelegramSchema();
+  const token = nanoid(32);
+  const row = await createBotActivationToken(userId, token);
+  const username = botUsername?.trim().replace(/^@/, "") || getTelegramBizBotUsername();
+  const activationLink = buildTelegramActivationLink(token, username);
+  const founderBot = getTelegramFounderBotUsername();
+  return {
+    token: row.token,
+    userId: row.userId,
+    activationLink,
+    deepLinkBiz: activationLink,
+    deepLinkFounder: founderBot ? buildTelegramActivationLink(token, founderBot) : null
+  };
+}
+var NO_ACCESS_MSG, NO_USER_FOUND_MSG, LINK_SUCCESS_MSG, INVALID_TOKEN_MSG, SYSTEM_ERROR_MSG, ALREADY_LINKED_MSG, CONTACT_TEAM_BUTTON_TEXT, CONTACT_TEAM_REPLY_MSG, PERSISTENT_REPLY_KEYBOARD;
+var init_telegram = __esm({
+  "server/telegram.ts"() {
+    "use strict";
+    init_oauth();
+    init_db();
+    init_ensureTelegramSchema();
+    init_llmWithApiKey();
+    init_telegramConfig();
+    NO_ACCESS_MSG = "\u101C\u1030\u1000\u103C\u102E\u1038\u1019\u1004\u103A\u1038\u104F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1001\u103D\u1004\u1037\u103A \u1000\u102F\u1014\u103A\u1006\u102F\u1036\u1038\u101E\u103D\u102C\u1038\u1015\u102B\u1015\u103C\u102E\u104B \u1011\u1015\u103A\u1019\u1036\u101D\u101A\u103A\u101A\u1030\u101B\u1014\u103A ChatPilot \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
+    NO_USER_FOUND_MSG = "\u1012\u102E Bot \u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1016\u102D\u102F\u1037 Website \u1019\u103E\u102C \u1021\u101B\u1004\u103A Register \u101C\u102F\u1015\u103A\u1015\u1031\u1038\u1015\u102B \u101E\u102D\u102F\u1037\u1019\u101F\u102F\u1010\u103A ChatPilot Agency \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
+    LINK_SUCCESS_MSG = "\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u1001\u103B\u102D\u1010\u103A\u1006\u1000\u103A\u1019\u103E\u102F \u1021\u1031\u102C\u1004\u103A\u1019\u103C\u1004\u103A\u1015\u102B\u101E\u100A\u103A\u104B \u1005\u1010\u1004\u103A\u1019\u1031\u1038\u1019\u103C\u1014\u103A\u1038\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B";
+    INVALID_TOKEN_MSG = "\u1001\u103B\u102D\u1010\u103A\u1006\u1000\u103A\u1019\u103E\u102F\u1019\u1021\u1031\u102C\u1004\u103A\u1019\u103C\u1004\u103A\u1015\u102B\u104B Admin \u1011\u1036\u1019\u103E \u101B\u101B\u103E\u102D\u101E\u1031\u102C activation link \u1000\u102D\u102F \u1015\u103C\u1014\u103A\u1005\u1019\u103A\u1038\u1000\u103C\u100A\u1037\u103A\u1015\u102B\u104B";
+    SYSTEM_ERROR_MSG = "\u1005\u1014\u1005\u103A\u1001\u103B\u102D\u102F\u1037\u101A\u103D\u1004\u103A\u1038\u1014\u1031\u1015\u102B\u101E\u100A\u103A\u104B \u1001\u100F\u1014\u1031\u1019\u103E \u1011\u1015\u103A\u1019\u1036\u1000\u103C\u102D\u102F\u1038\u1005\u102C\u1038\u1000\u103C\u100A\u1037\u103A\u1015\u102B\u104B";
+    ALREADY_LINKED_MSG = "\u1021\u1000\u1031\u102C\u1004\u1037\u103A \u1001\u103B\u102D\u1010\u103A\u1006\u1000\u103A\u1015\u103C\u102E\u1038\u101E\u102C\u1038\u1016\u103C\u1005\u103A\u1015\u102B\u101E\u100A\u103A\u104B \u1005\u102C\u101E\u102C\u1038\u1015\u102D\u102F\u1037\u1015\u103C\u102E\u1038 \u1019\u1031\u1038\u1019\u103C\u1014\u103A\u1038\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B";
+    CONTACT_TEAM_BUTTON_TEXT = "\u{1F4DE} ChatPilot Team \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u101B\u1014\u103A";
+    CONTACT_TEAM_REPLY_MSG = `\u1019\u100A\u103A\u101E\u100A\u1037\u103A\u1021\u1000\u103C\u1031\u102C\u1004\u103A\u1038\u1021\u101B\u102C\u1021\u1010\u103D\u1000\u103A \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u101C\u102D\u102F\u1015\u102B\u101E\u101C\u1032 \u1001\u1004\u103A\u1017\u103B\u102C? \u{1F447}
+
+\u1041\u104B \u{1F48E} \u1021\u1000\u1031\u102C\u1004\u1037\u103A\u101E\u1000\u103A\u1010\u1019\u103A\u1038 (\u101E\u102D\u102F\u1037) \u1021\u1000\u103C\u102D\u1019\u103A\u101B\u1031 \u1010\u102D\u102F\u1038\u101B\u1014\u103A
+\u{1F449} https://t.me/chatpilot_ai_bot?text=\u1019\u1004\u103A\u1039\u1002\u101C\u102C\u1015\u102B\u104A%20\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u101E\u1000\u103A\u1010\u1019\u103A\u1038\u1010\u102D\u102F\u1038\u1001\u103B\u1004\u103A\u101C\u102D\u102F\u1037\u1015\u102B
+
+\u1042\u104B \u{1F4AC} \u1021\u1001\u103C\u102C\u1038\u101E\u102D\u101C\u102D\u102F\u101E\u100A\u103A\u1019\u103B\u102C\u1038 \u1019\u1031\u1038\u1019\u103C\u1014\u103A\u1038\u101B\u1014\u103A
+\u{1F449} https://t.me/chatpilot_ai_bot?text=\u1019\u1004\u103A\u1039\u1002\u101C\u102C\u1015\u102B\u104A%20\u1021\u1001\u103C\u102C\u1038\u1021\u1000\u103C\u1031\u102C\u1004\u103A\u1038\u1021\u101B\u102C\u101C\u1031\u1038%20\u1019\u1031\u1038\u1001\u103B\u1004\u103A\u101C\u102D\u102F\u1037\u1015\u102B`;
+    PERSISTENT_REPLY_KEYBOARD = {
+      keyboard: [[{ text: CONTACT_TEAM_BUTTON_TEXT }]],
+      resize_keyboard: true,
+      is_persistent: true
+    };
+  }
+});
+
+// server/storage.ts
+var storage_exports = {};
+__export(storage_exports, {
+  storageGet: () => storageGet,
+  storageGetSignedUrl: () => storageGetSignedUrl,
+  storagePut: () => storagePut
+});
+function getForgeConfig() {
+  const forgeUrl = ENV.forgeApiUrl;
+  const forgeKey = ENV.forgeApiKey;
+  if (!forgeUrl || !forgeKey) {
+    throw new Error(
+      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
+    );
+  }
+  return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
+}
+function normalizeKey(relKey) {
+  return relKey.replace(/^\/+/, "");
+}
+function appendHashSuffix(relKey) {
+  const hash = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  const lastDot = relKey.lastIndexOf(".");
+  if (lastDot === -1) return `${relKey}_${hash}`;
+  return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
+}
+async function storagePut(relKey, data, contentType = "application/octet-stream") {
+  const { forgeUrl, forgeKey } = getForgeConfig();
+  const key = appendHashSuffix(normalizeKey(relKey));
+  const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
+  presignUrl.searchParams.set("path", key);
+  const presignResp = await fetch(presignUrl, {
+    headers: { Authorization: `Bearer ${forgeKey}` }
+  });
+  if (!presignResp.ok) {
+    const msg = await presignResp.text().catch(() => presignResp.statusText);
+    throw new Error(`Storage presign failed (${presignResp.status}): ${msg}`);
+  }
+  const { url: s3Url } = await presignResp.json();
+  if (!s3Url) throw new Error("Forge returned empty presign URL");
+  const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data], { type: contentType });
+  const uploadResp = await fetch(s3Url, {
+    method: "PUT",
+    headers: { "Content-Type": contentType },
+    body: blob
+  });
+  if (!uploadResp.ok) {
+    throw new Error(`Storage upload to S3 failed (${uploadResp.status})`);
+  }
+  return { key, url: `/manus-storage/${key}` };
+}
+async function storageGet(relKey) {
+  const key = normalizeKey(relKey);
+  return { key, url: `/manus-storage/${key}` };
+}
+async function storageGetSignedUrl(relKey) {
+  const { forgeUrl, forgeKey } = getForgeConfig();
+  const key = normalizeKey(relKey);
+  const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
+  getUrl.searchParams.set("path", key);
+  const resp = await fetch(getUrl, {
+    headers: { Authorization: `Bearer ${forgeKey}` }
+  });
+  if (!resp.ok) {
+    const msg = await resp.text().catch(() => resp.statusText);
+    throw new Error(`Storage signed URL failed (${resp.status}): ${msg}`);
+  }
+  const { url } = await resp.json();
+  return url;
+}
+var init_storage = __esm({
+  "server/storage.ts"() {
+    "use strict";
+    init_env();
+  }
+});
+
+// scripts/vercel-api-entry.ts
+import "dotenv/config";
+
+// server/_core/app.ts
+init_oauth();
+import express from "express";
+import cookieParser from "cookie-parser";
+import { createExpressMiddleware } from "@trpc/server/adapters/express";
+
+// server/_core/storageProxy.ts
+init_env();
+var LOCAL_ASSET_REDIRECTS = {
+  "pilothub-logo.png": "/pilothub-logo.PNG",
+  "pilothub-logo.PNG": "/pilothub-logo.PNG"
+};
+function resolveLocalAsset(key) {
+  const normalized = key.replace(/^\/+/, "").toLowerCase();
+  const basename = normalized.split("/").pop() ?? normalized;
+  if (LOCAL_ASSET_REDIRECTS[basename]) {
+    return LOCAL_ASSET_REDIRECTS[basename];
+  }
+  if (basename.includes("pilothub-logo")) {
+    return "/pilothub-logo.PNG";
+  }
+  return null;
+}
+function registerStorageProxy(app2) {
+  app2.get("/manus-storage/*", async (req, res) => {
+    const key = req.params["0"];
+    if (!key) {
+      res.status(400).send("Missing storage key");
+      return;
+    }
+    const localPath = resolveLocalAsset(key);
+    if (localPath) {
+      res.set("Cache-Control", "public, max-age=86400");
+      res.redirect(307, localPath);
+      return;
+    }
+    if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
+      res.status(404).send("Storage asset not found");
+      return;
+    }
+    try {
+      const forgeUrl = new URL(
+        "v1/storage/presign/get",
+        ENV.forgeApiUrl.replace(/\/+$/, "") + "/"
+      );
+      forgeUrl.searchParams.set("path", key);
+      const forgeResp = await fetch(forgeUrl, {
+        headers: { Authorization: `Bearer ${ENV.forgeApiKey}` }
+      });
+      if (!forgeResp.ok) {
+        const body = await forgeResp.text().catch(() => "");
+        console.warn(`[StorageProxy] forge miss for "${key}": ${forgeResp.status} ${body}`);
+        res.status(404).send("Storage asset not found");
+        return;
+      }
+      const { url } = await forgeResp.json();
+      if (!url) {
+        res.status(404).send("Empty signed URL from backend");
+        return;
+      }
+      res.set("Cache-Control", "no-store");
+      res.redirect(307, url);
+    } catch (err) {
+      console.error("[StorageProxy] failed:", err);
+      res.status(404).send("Storage proxy error");
+    }
+  });
+}
+
+// server/routers.ts
+init_cookies();
+
+// server/_core/systemRouter.ts
+import { z } from "zod";
+
+// server/_core/notification.ts
+init_env();
+import { TRPCError } from "@trpc/server";
+var TITLE_MAX_LENGTH = 1200;
+var CONTENT_MAX_LENGTH = 2e4;
+var trimValue = (value) => value.trim();
+var isNonEmptyString2 = (value) => typeof value === "string" && value.trim().length > 0;
+var buildEndpointUrl = (baseUrl) => {
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return new URL(
+    "webdevtoken.v1.WebDevService/SendNotification",
+    normalizedBase
+  ).toString();
+};
+var validatePayload = (input) => {
+  if (!isNonEmptyString2(input.title)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Notification title is required."
+    });
+  }
+  if (!isNonEmptyString2(input.content)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Notification content is required."
+    });
+  }
+  const title = trimValue(input.title);
+  const content = trimValue(input.content);
+  if (title.length > TITLE_MAX_LENGTH) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Notification title must be at most ${TITLE_MAX_LENGTH} characters.`
+    });
+  }
+  if (content.length > CONTENT_MAX_LENGTH) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Notification content must be at most ${CONTENT_MAX_LENGTH} characters.`
+    });
+  }
+  return { title, content };
+};
+async function notifyOwner(payload) {
+  const { title, content } = validatePayload(payload);
+  if (!ENV.forgeApiUrl) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Notification service URL is not configured."
+    });
+  }
+  if (!ENV.forgeApiKey) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Notification service API key is not configured."
+    });
+  }
+  const endpoint = buildEndpointUrl(ENV.forgeApiUrl);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${ENV.forgeApiKey}`,
+        "content-type": "application/json",
+        "connect-protocol-version": "1"
+      },
+      body: JSON.stringify({ title, content })
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.warn(
+        `[Notification] Failed to notify owner (${response.status} ${response.statusText})${detail ? `: ${detail}` : ""}`
+      );
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn("[Notification] Error calling notification service:", error);
+    return false;
+  }
+}
+
+// server/_core/trpc.ts
+init_const();
+init_userStatus();
+import { initTRPC, TRPCError as TRPCError2 } from "@trpc/server";
+import superjson from "superjson";
+var t = initTRPC.context().create({
+  transformer: superjson
+});
+var router = t.router;
+var publicProcedure = t.procedure;
+var requireUser = t.middleware(async (opts) => {
+  const { ctx, next } = opts;
+  if (!ctx.user) {
+    throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+  return next({
+    ctx: {
+      ...ctx,
+      user: ctx.user
+    }
+  });
+});
+var protectedProcedure = t.procedure.use(requireUser);
+var requireApproved = t.middleware(async (opts) => {
+  const { ctx, next } = opts;
+  if (!ctx.user) {
+    throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+  if (!isUserApproved(ctx.user) && isPendingUserStatus(ctx.user.status)) {
+    throw new TRPCError2({ code: "FORBIDDEN", message: "Your account is pending admin approval." });
+  }
+  return next({ ctx: { ...ctx, user: ctx.user } });
+});
+var approvedProcedure = t.procedure.use(requireApproved);
+var adminProcedure = t.procedure.use(
+  t.middleware(async (opts) => {
+    const { ctx, next } = opts;
+    if (!ctx.user || ctx.user.role !== "admin") {
+      throw new TRPCError2({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user
+      }
+    });
+  })
+);
+
+// server/_core/systemRouter.ts
+var systemRouter = router({
+  health: publicProcedure.input(
+    z.object({
+      timestamp: z.number().min(0, "timestamp cannot be negative")
+    })
+  ).query(() => ({
+    ok: true
+  })),
+  notifyOwner: adminProcedure.input(
+    z.object({
+      title: z.string().min(1, "title is required"),
+      content: z.string().min(1, "content is required")
+    })
+  ).mutation(async ({ input }) => {
+    const delivered = await notifyOwner(input);
+    return {
+      success: delivered
+    };
+  })
+});
+
+// server/routers.ts
+init_db();
+init_llmWithApiKey();
+init_telegram();
+import { z as z2 } from "zod";
+import { TRPCError as TRPCError3 } from "@trpc/server";
+
+// server/quickCreateUser.ts
+init_db();
+init_ensureTelegramSchema();
+init_telegram();
+import { nanoid as nanoid2 } from "nanoid";
+function generateShadowOpenId() {
+  return `shadow_${nanoid2(24)}`;
+}
+function defaultExpiryOneMonth() {
+  const d = /* @__PURE__ */ new Date();
+  d.setMonth(d.getMonth() + 1);
+  return d;
+}
+function resolveLimits(input) {
+  const biz = input.bizMessageLimit ?? (input.planType === "bizpilot" ? 20 : 0);
+  const founder = input.founderMessageLimit ?? (input.planType === "founderpilot" ? 20 : 0);
+  return {
+    bizMessageLimit: Math.max(0, biz),
+    founderMessageLimit: Math.max(0, founder)
+  };
+}
+async function quickCreateTelegramUser(input) {
+  await ensureTelegramSchema();
+  const email = normalizeEmail(input.email);
+  const name = input.name.trim();
+  if (!email || !name) {
+    throw new Error("email and name are required");
+  }
+  let user = await getUserByEmail(email);
+  let created = false;
+  if (!user) {
+    const openId = generateShadowOpenId();
+    await upsertUser({
+      openId,
+      name,
+      email,
+      loginMethod: "telegram_shadow",
+      status: "active",
+      lastSignedIn: /* @__PURE__ */ new Date()
+    });
+    user = await getUserByOpenId(openId);
+    if (!user) throw new Error("Failed to create user");
+    created = true;
+  } else {
+    await updateUserProfile(user.id, { name });
+  }
+  const limits = resolveLimits(input);
+  await updateTelegramUserPlan({
+    userId: user.id,
+    bizMessageLimit: limits.bizMessageLimit,
+    founderMessageLimit: limits.founderMessageLimit,
+    planExpiryDate: input.planExpiryDate ?? defaultExpiryOneMonth()
+  });
+  await updateUserSubscription(user.id, input.planType, "active");
+  const tokenResult = await generateTelegramActivationToken(
+    user.id,
+    input.botUsername
+  );
+  return {
+    userId: user.id,
+    openId: user.openId,
+    email: user.email ?? email,
+    name: user.name ?? name,
+    planType: input.planType,
+    created,
+    token: tokenResult.token,
+    activationLink: tokenResult.activationLink
+  };
+}
+function parsePlanType(value) {
+  const v = (value ?? "").toLowerCase().trim();
+  if (v === "founderpilot" || v === "founder" || v === "founder_pilot") {
+    return "founderpilot";
+  }
+  return "bizpilot";
 }
 
 // server/routers.ts
@@ -2508,6 +3525,7 @@ Powered by ChatPilot`
 }
 
 // server/routers.ts
+init_adminAccess();
 var COOKIE_NAME2 = "app_session_id";
 async function requireAdmin(ctx) {
   const hasAdminCookie = ctx.req.cookies?.admin_session === "authenticated";
@@ -2897,8 +3915,8 @@ Ref: ${input.transactionRef ?? "N/A"}`
         await requireAdmin(ctx);
         const app2 = await getApplicationById(input.applicationId);
         if (!app2) throw new TRPCError3({ code: "NOT_FOUND" });
-        const { nanoid: nanoid2 } = await import("nanoid");
-        const openId = `app_${nanoid2(16)}`;
+        const { nanoid: nanoid4 } = await import("nanoid");
+        const openId = `app_${nanoid4(16)}`;
         await upsertUser({
           openId,
           name: app2.fullName,
@@ -2951,8 +3969,8 @@ Ref: ${input.transactionRef ?? "N/A"}`
       }),
       generate: publicProcedure.input(z2.object({ name: z2.string().min(1), email: z2.string().email(), plan: z2.enum(["bizpilot", "founderpilot"]).optional(), businessName: z2.string().optional() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
-        const { nanoid: nanoid2 } = await import("nanoid");
-        const openId = `ext_${nanoid2(16)}`;
+        const { nanoid: nanoid4 } = await import("nanoid");
+        const openId = `ext_${nanoid4(16)}`;
         const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$";
         const generatedPassword = Array.from({ length: 14 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
         await upsertUser({ openId, name: input.name, email: input.email, loginMethod: "admin_generated", lastSignedIn: /* @__PURE__ */ new Date() });
@@ -2965,6 +3983,15 @@ Ref: ${input.transactionRef ?? "N/A"}`
         await requireAdmin(ctx);
         await deleteUser(input.userId);
         return { success: true };
+      }),
+      generateTelegramToken: publicProcedure.input(z2.object({ userId: z2.number() })).mutation(async ({ ctx, input }) => {
+        await requireAdmin(ctx);
+        try {
+          return await generateTelegramActivationToken(input.userId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to generate token";
+          throw new TRPCError3({ code: "BAD_REQUEST", message });
+        }
       })
     }),
     // ── Payment management ──
@@ -3127,6 +4154,154 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         return { success: true };
       })
     }),
+    // ── Telegram bot management ──
+    telegram: router({
+      getSettings: publicProcedure.query(async ({ ctx }) => {
+        await requireAdmin(ctx);
+        const { getTelegramBizBotUsername: getTelegramBizBotUsername2, getTelegramFounderBotUsername: getTelegramFounderBotUsername2 } = await Promise.resolve().then(() => (init_telegram(), telegram_exports));
+        const { isTelegramBotUsernameConfigured: isTelegramBotUsernameConfigured2 } = await Promise.resolve().then(() => (init_telegramConfig(), telegramConfig_exports));
+        const bizBotUsername = getTelegramBizBotUsername2();
+        const founderBotUsername = getTelegramFounderBotUsername2();
+        return {
+          bizBotUsername,
+          founderBotUsername,
+          bizBotUsernameConfigured: isTelegramBotUsernameConfigured2(bizBotUsername)
+        };
+      }),
+      list: publicProcedure.query(async ({ ctx }) => {
+        await requireAdmin(ctx);
+        const users4 = await listTelegramBotUsers();
+        return { users: users4 };
+      }),
+      syncSchema: publicProcedure.mutation(async ({ ctx }) => {
+        await requireAdmin(ctx);
+        const { ensureTelegramSchema: ensureTelegramSchema2, resetTelegramSchemaCache: resetTelegramSchemaCache2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+        resetTelegramSchemaCache2();
+        await ensureTelegramSchema2();
+        return { success: true };
+      }),
+      setupWebhook: publicProcedure.input(
+        z2.object({
+          advisor: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot")
+        })
+      ).mutation(async ({ ctx, input }) => {
+        await requireAdmin(ctx);
+        try {
+          const baseUrl = resolveWebhookBaseUrl(ctx.req);
+          return await setupTelegramWebhook(input.advisor, baseUrl);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Webhook setup failed";
+          throw new TRPCError3({ code: "BAD_REQUEST", message });
+        }
+      }),
+      updatePlan: publicProcedure.input(
+        z2.object({
+          userId: z2.number(),
+          bizMessageLimit: z2.number().int().min(0).optional(),
+          founderMessageLimit: z2.number().int().min(0).optional(),
+          addBizMessages: z2.number().int().min(0).optional(),
+          addFounderMessages: z2.number().int().min(0).optional(),
+          planExpiryDate: z2.string().nullable().optional()
+        })
+      ).mutation(async ({ ctx, input }) => {
+        await requireAdmin(ctx);
+        try {
+          let parsedExpiry = void 0;
+          if (input.planExpiryDate !== void 0) {
+            if (input.planExpiryDate === null || input.planExpiryDate === "") {
+              parsedExpiry = null;
+            } else {
+              const d = new Date(input.planExpiryDate.includes("T") ? input.planExpiryDate : `${input.planExpiryDate}T23:59:59`);
+              if (Number.isNaN(d.getTime())) {
+                throw new Error("Invalid expiry date");
+              }
+              parsedExpiry = d;
+            }
+          }
+          await updateTelegramUserPlan({
+            userId: input.userId,
+            bizMessageLimit: input.bizMessageLimit,
+            founderMessageLimit: input.founderMessageLimit,
+            addBizMessages: input.addBizMessages,
+            addFounderMessages: input.addFounderMessages,
+            planExpiryDate: parsedExpiry
+          });
+          return { success: true };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to update plan";
+          throw new TRPCError3({ code: "BAD_REQUEST", message });
+        }
+      }),
+      quickAddUser: publicProcedure.input(
+        z2.object({
+          name: z2.string().min(1),
+          email: z2.string().email(),
+          planType: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
+          bizMessageLimit: z2.number().int().min(0).default(20),
+          founderMessageLimit: z2.number().int().min(0).default(0),
+          planExpiryDate: z2.string().optional(),
+          botUsername: z2.string().min(1).optional()
+        })
+      ).mutation(async ({ ctx, input }) => {
+        await requireAdmin(ctx);
+        try {
+          let planExpiryDate = void 0;
+          if (input.planExpiryDate) {
+            const d = new Date(
+              input.planExpiryDate.includes("T") ? input.planExpiryDate : `${input.planExpiryDate}T23:59:59`
+            );
+            if (Number.isNaN(d.getTime())) {
+              throw new Error("Invalid expiry date");
+            }
+            planExpiryDate = d;
+          }
+          return await quickCreateTelegramUser({
+            email: input.email,
+            name: input.name,
+            planType: input.planType,
+            bizMessageLimit: input.bizMessageLimit,
+            founderMessageLimit: input.founderMessageLimit,
+            planExpiryDate,
+            botUsername: input.botUsername
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to create user";
+          throw new TRPCError3({ code: "BAD_REQUEST", message });
+        }
+      }),
+      createActivationToken: publicProcedure.input(
+        z2.object({
+          userId: z2.number(),
+          botUsername: z2.string().min(1).optional()
+        })
+      ).mutation(async ({ ctx, input }) => {
+        await requireAdmin(ctx);
+        try {
+          return await generateTelegramActivationToken(
+            input.userId,
+            input.botUsername
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to generate token";
+          throw new TRPCError3({ code: "BAD_REQUEST", message });
+        }
+      }),
+      /** @deprecated Use createActivationToken */
+      generateLink: publicProcedure.input(
+        z2.object({
+          userId: z2.number(),
+          botUsername: z2.string().min(1).optional()
+        })
+      ).mutation(async ({ ctx, input }) => {
+        await requireAdmin(ctx);
+        try {
+          return await generateTelegramActivationToken(input.userId, input.botUsername);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to generate link";
+          throw new TRPCError3({ code: "BAD_REQUEST", message });
+        }
+      })
+    }),
     // ── External API Token management ──
     externalTokens: router({
       list: publicProcedure.query(async ({ ctx }) => {
@@ -3135,8 +4310,8 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
       }),
       create: publicProcedure.input(z2.object({ name: z2.string().min(1) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
-        const { nanoid: nanoid2 } = await import("nanoid");
-        const token = `ph_ext_${nanoid2(32)}`;
+        const { nanoid: nanoid4 } = await import("nanoid");
+        const token = `ph_ext_${nanoid4(32)}`;
         const result = await createExternalApiToken(input.name, token);
         return { success: true, id: result.id, token };
       }),
@@ -3157,6 +4332,7 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
 });
 
 // server/_core/context.ts
+init_sdk();
 async function createContext(opts) {
   let user = null;
   try {
@@ -3172,7 +4348,11 @@ async function createContext(opts) {
 }
 
 // server/publicApi.ts
-import { nanoid } from "nanoid";
+init_db();
+import { nanoid as nanoid3 } from "nanoid";
+init_telegram();
+init_telegram();
+init_telegramConfig();
 function getPublicApiKey() {
   return process.env.PUBLIC_API_KEY || "pilothub-public-api-key-2026";
 }
@@ -3207,9 +4387,14 @@ function generatePassword(length = 12) {
 }
 function registerPublicApiRoutes(app2) {
   app2.get("/api/public/info", (_req, res) => {
+    const bizBotUsername = getTelegramBizBotUsername();
     res.json({
       name: "PilotHub Public API",
       version: "2.0.0",
+      telegram: {
+        bizBotUsername,
+        bizBotUsernameConfigured: isTelegramBotUsernameConfigured(bizBotUsername)
+      },
       plans: [
         { id: "bizpilot", name: "BizPilot", price: 1e5, currency: "MMK" },
         { id: "founderpilot", name: "FounderPilot", price: 3e5, currency: "MMK" }
@@ -3219,7 +4404,9 @@ function registerPublicApiRoutes(app2) {
         { method: "POST", path: "/api/public/users/create", auth: "X-API-Key (public)", description: "Create a user account" },
         { method: "GET", path: "/api/public/users/list", auth: "X-API-Key (admin)", description: "List all users" },
         { method: "POST", path: "/api/public/payments/submit", auth: "X-API-Key (public)", description: "Submit a payment" },
-        { method: "GET", path: "/api/public/payments/list", auth: "X-API-Key (admin)", description: "List all payments" }
+        { method: "GET", path: "/api/public/payments/list", auth: "X-API-Key (admin)", description: "List all payments" },
+        { method: "POST", path: "/api/admin/telegram/token", auth: "X-API-Key (admin)", description: "Generate Telegram bot activation token for a user" },
+        { method: "POST", path: "/api/external/create-user", auth: "X-API-Key (public)", description: "Quick-create shadow user + Telegram activation link (AI sales agent)" }
       ]
     });
   });
@@ -3262,7 +4449,7 @@ function registerPublicApiRoutes(app2) {
             const { storagePut: storagePut2 } = await Promise.resolve().then(() => (init_storage(), storage_exports));
             const buffer = Buffer.from(screenshotBase64, "base64");
             const ext = screenshotMime?.includes("png") ? "png" : "jpg";
-            const key = `payment-screenshots/ext-${Date.now()}-${nanoid(8)}.${ext}`;
+            const key = `payment-screenshots/ext-${Date.now()}-${nanoid3(8)}.${ext}`;
             const result = await storagePut2(key, buffer, screenshotMime || "image/jpeg");
             screenshotUrl = result.url;
           } catch (e) {
@@ -3309,7 +4496,7 @@ Ref: ${transactionRef ?? "N/A"}`
         res.status(400).json({ success: false, error: "name and email are required" });
         return;
       }
-      const openId = `ext_${nanoid(16)}`;
+      const openId = `ext_${nanoid3(16)}`;
       const generatedPassword = generatePassword(14);
       await upsertUser({ openId, name, email, loginMethod: "external", lastSignedIn: /* @__PURE__ */ new Date() });
       const user = await getUserByOpenId(openId);
@@ -3361,7 +4548,7 @@ Ref: ${transactionRef ?? "N/A"}`
           const { storagePut: storagePut2 } = await Promise.resolve().then(() => (init_storage(), storage_exports));
           const buffer = Buffer.from(screenshotBase64, "base64");
           const ext = screenshotMime?.includes("png") ? "png" : "jpg";
-          const key = `payment-screenshots/ext-${Date.now()}-${nanoid(8)}.${ext}`;
+          const key = `payment-screenshots/ext-${Date.now()}-${nanoid3(8)}.${ext}`;
           const result = await storagePut2(key, buffer, screenshotMime || "image/jpeg");
           screenshotUrl = result.url;
         } catch (e) {
@@ -3397,6 +4584,73 @@ Ref: ${transactionRef ?? "N/A"}`
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   });
+  app2.post("/api/admin/telegram/token", async (req, res) => {
+    if (!await requireApiKey(req, res, true)) return;
+    try {
+      const { userId } = req.body;
+      if (!userId || typeof userId !== "number") {
+        res.status(400).json({ success: false, error: "userId (number) is required" });
+        return;
+      }
+      const result = await generateTelegramActivationToken(userId);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Internal server error";
+      console.error("[PublicAPI] /admin/telegram/token error:", err);
+      res.status(400).json({ success: false, error: message });
+    }
+  });
+  app2.post("/api/external/create-user", async (req, res) => {
+    if (!await requireApiKey(req, res)) return;
+    try {
+      const body = req.body;
+      if (!body.email?.trim() || !body.name?.trim()) {
+        res.status(400).json({ success: false, error: "email and name are required" });
+        return;
+      }
+      let planExpiryDate = void 0;
+      if (body.planExpiryDate !== void 0) {
+        if (body.planExpiryDate === null || body.planExpiryDate === "") {
+          planExpiryDate = null;
+        } else {
+          const d = new Date(
+            body.planExpiryDate.includes("T") ? body.planExpiryDate : `${body.planExpiryDate}T23:59:59`
+          );
+          if (Number.isNaN(d.getTime())) {
+            res.status(400).json({ success: false, error: "Invalid planExpiryDate" });
+            return;
+          }
+          planExpiryDate = d;
+        }
+      }
+      const result = await quickCreateTelegramUser({
+        email: body.email.trim(),
+        name: body.name.trim(),
+        planType: parsePlanType(body.planType),
+        bizMessageLimit: typeof body.bizMessageLimit === "number" ? body.bizMessageLimit : void 0,
+        founderMessageLimit: typeof body.founderMessageLimit === "number" ? body.founderMessageLimit : void 0,
+        planExpiryDate,
+        botUsername: body.botUsername?.trim()
+      });
+      res.json({
+        success: true,
+        userId: result.userId,
+        openId: result.openId,
+        email: result.email,
+        name: result.name,
+        planType: result.planType,
+        created: result.created,
+        token: result.token,
+        botUsername: getTelegramBizBotUsername(),
+        activationLink: result.activationLink,
+        telegramStartLink: result.activationLink
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Internal server error";
+      console.error("[ExternalAPI] /create-user error:", err);
+      res.status(400).json({ success: false, error: message });
+    }
+  });
   app2.get("/api/public/payments/list", async (req, res) => {
     if (!await requireApiKey(req, res, true)) return;
     try {
@@ -3410,6 +4664,7 @@ Ref: ${transactionRef ?? "N/A"}`
 }
 
 // server/_core/app.ts
+init_telegram();
 function createApp(_options = {}) {
   const app2 = express();
   app2.use(express.json({ limit: "50mb" }));
@@ -3417,6 +4672,7 @@ function createApp(_options = {}) {
   app2.use(cookieParser());
   registerStorageProxy(app2);
   registerPublicApiRoutes(app2);
+  registerTelegramRoutes(app2);
   registerOAuthRoutes(app2);
   app2.use(
     "/api/trpc",
@@ -3429,6 +4685,7 @@ function createApp(_options = {}) {
 }
 
 // scripts/vercel-api-entry.ts
+var maxDuration = 60;
 var app = createApp({ apiOnly: true });
 async function handler(req, res) {
   try {
@@ -3453,6 +4710,7 @@ async function handler(req, res) {
   }
 }
 export {
-  handler as default
+  handler as default,
+  maxDuration
 };
 //# sourceMappingURL=index.js.map

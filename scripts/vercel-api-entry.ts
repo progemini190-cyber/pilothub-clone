@@ -1,3 +1,6 @@
+/** Vercel serverless max duration (seconds). Applies to all `/api/*` routes, including Telegram webhook. */
+export const maxDuration = 60;
+
 import "dotenv/config";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createApp } from "../server/_core/app";
