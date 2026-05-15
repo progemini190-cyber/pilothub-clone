@@ -7,6 +7,9 @@ dist/
 build/
 *.dist
 
+# Local DB exports (may contain API keys — never commit)
+migration-data/
+
 # Environment variables
 .env
 .env.local

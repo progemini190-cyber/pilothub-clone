@@ -12,7 +12,11 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit migrate",
-    "db:sync-legacy": "node scripts/sync-mysql-to-turso.mjs"
+    "db:sync-legacy": "node scripts/sync-mysql-to-turso.mjs",
+    "db:migrate-all": "npx tsx scripts/migrate-all-to-turso.ts",
+    "db:recover": "npx tsx scripts/recover-from-json.ts",
+    "db:import-local": "npx tsx scripts/import-discovered-data.ts",
+    "db:final-import": "npx tsx scripts/final-import.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
