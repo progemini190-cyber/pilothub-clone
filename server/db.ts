@@ -1,5 +1,5 @@
 import { createClient } from "@libsql/client";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc, asc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import {
   InsertUser,
@@ -83,11 +83,48 @@ export async function getUserById(id: number) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  const normalized = normalizeEmail(email);
+  const result = await db
+    .select()
+    .from(users)
+    .where(sql`lower(trim(${users.email})) = ${normalized}`)
+    .limit(1);
   return result.length > 0 ? result[0] : undefined;
+}
+
+/** Re-attach an admin-provisioned account (`app_*` openId) to the user's Google `sub`. */
+export async function linkUserToGoogleOpenId(
+  userId: number,
+  googleOpenId: string,
+  fields: { name?: string | null; loginMethod?: string },
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const conflicting = await getUserByOpenId(googleOpenId);
+  if (conflicting && conflicting.id !== userId) {
+    if (conflicting.status === "pending" && conflicting.loginMethod === "google") {
+      await db.delete(users).where(eq(users.id, conflicting.id));
+    } else {
+      throw new Error("This Google account is already linked to another user");
+    }
+  }
+
+  const updateSet: Record<string, unknown> = {
+    openId: googleOpenId,
+    loginMethod: fields.loginMethod ?? "google",
+    lastSignedIn: new Date(),
+  };
+  if (fields.name !== undefined) updateSet.name = fields.name;
+
+  await db.update(users).set(updateSet as Record<string, unknown>).where(eq(users.id, userId));
 }
 
 // ── Tiered message counter helpers ──
@@ -603,11 +640,33 @@ export async function getApplicationById(id: number) {
   return result[0];
 }
 
+export async function getApplicationByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const normalized = normalizeEmail(email);
+  const result = await db
+    .select()
+    .from(applications)
+    .where(sql`lower(trim(${applications.email})) = ${normalized}`)
+    .orderBy(desc(applications.createdAt))
+    .limit(1);
+  return result[0];
+}
+
 export async function getApprovedApplicationByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select().from(applications)
-    .where(eq(applications.email, email))
+  const normalized = normalizeEmail(email);
+  const result = await db
+    .select()
+    .from(applications)
+    .where(
+      and(
+        sql`lower(trim(${applications.email})) = ${normalized}`,
+        eq(applications.status, "approved"),
+      ),
+    )
+    .orderBy(desc(applications.createdAt))
     .limit(1);
   return result[0];
 }

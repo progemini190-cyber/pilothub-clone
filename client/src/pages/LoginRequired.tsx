@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { AlertTriangle, Mail, ArrowLeft } from "lucide-react";
+import { AlertTriangle, Clock, Mail, ArrowLeft } from "lucide-react";
 import { getLoginUrl } from "@/const";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
@@ -20,6 +20,8 @@ export default function LoginRequired() {
   };
 
   const isUnverified = reason === "unverified";
+  const isPending = reason === "pending";
+  const showApplyCta = !isPending;
 
   return (
     <div
@@ -45,13 +47,28 @@ export default function LoginRequired() {
 
         <div
           className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5"
-          style={{ background: "oklch(65% 0.22 30 / 0.15)", border: "1px solid oklch(65% 0.22 30 / 0.4)" }}
+          style={{
+            background: isPending
+              ? "oklch(55% 0.14 75 / 0.15)"
+              : "oklch(65% 0.22 30 / 0.15)",
+            border: isPending
+              ? "1px solid oklch(55% 0.14 75 / 0.4)"
+              : "1px solid oklch(65% 0.22 30 / 0.4)",
+          }}
         >
-          <AlertTriangle className="w-8 h-8" style={{ color: "oklch(75% 0.18 55)" }} />
+          {isPending ? (
+            <Clock className="w-8 h-8" style={{ color: "oklch(78% 0.12 75)" }} />
+          ) : (
+            <AlertTriangle className="w-8 h-8" style={{ color: "oklch(75% 0.18 55)" }} />
+          )}
         </div>
 
         <h1 className="text-xl font-bold text-white mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-          {isUnverified ? "Verify your Google account" : "ဤ Google Account ဖြင့် ဝင်ခွင့်မရပါ"}
+          {isUnverified
+            ? "Verify your Google account"
+            : isPending
+              ? "Waiting for Admin Approval"
+              : "ဤ Google Account ဖြင့် ဝင်ခွင့်မရပါ"}
         </h1>
 
         {isUnverified && (
@@ -72,7 +89,18 @@ export default function LoginRequired() {
           </div>
         )}
 
-        {!isUnverified && (
+        {isPending && (
+          <>
+            <p className="text-sm mb-2" style={{ color: "oklch(65% 0.03 220)", lineHeight: 1.7 }}>
+              Your account is registered with PilotHub and is <strong style={{ color: "oklch(78% 0.12 75)" }}>waiting for admin approval</strong>.
+            </p>
+            <p className="text-sm mb-6" style={{ color: "oklch(65% 0.03 220)", lineHeight: 1.7 }}>
+              You do not need to apply again. We will email you when access is granted — then sign in with the same Google account.
+            </p>
+          </>
+        )}
+
+        {!isUnverified && !isPending && (
           <>
             <p className="text-sm mb-2" style={{ color: "oklch(65% 0.03 220)", lineHeight: 1.7 }}>
               ဤ email address သည် PilotHub တွင် <strong style={{ color: "oklch(75% 0.18 55)" }}>approved မဖြစ်သေး</strong> သော account ဖြစ်သည်။
@@ -89,34 +117,38 @@ export default function LoginRequired() {
             <GoogleSignInButton className="w-full" />
           ) : (
             <>
-              <button
-                type="button"
-                onClick={handleLogoutAndRetry}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition hover:opacity-90"
-                style={{
-                  background: "oklch(72% 0.18 162)",
-                  color: "oklch(12% 0.03 220)",
-                  boxShadow: "0 0 20px oklch(72% 0.18 162 / 0.3)",
-                }}
-              >
-                တခြား Google Account ဖြင့် Login ဝင်ပါ
-              </button>
+              {!isPending && (
+                <button
+                  type="button"
+                  onClick={handleLogoutAndRetry}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition hover:opacity-90"
+                  style={{
+                    background: "oklch(72% 0.18 162)",
+                    color: "oklch(12% 0.03 220)",
+                    boxShadow: "0 0 20px oklch(72% 0.18 162 / 0.3)",
+                  }}
+                >
+                  တခြား Google Account ဖြင့် Login ဝင်ပါ
+                </button>
+              )}
               <GoogleSignInButton className="w-full" />
             </>
           )}
 
-          <button
-            type="button"
-            onClick={() => setLocation("/apply")}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition"
-            style={{
-              background: "transparent",
-              color: "white",
-              border: "1px solid oklch(35% 0.05 220)",
-            }}
-          >
-            Access လျှောက်ထားပါ
-          </button>
+          {showApplyCta && (
+            <button
+              type="button"
+              onClick={() => setLocation("/apply")}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition"
+              style={{
+                background: "transparent",
+                color: "white",
+                border: "1px solid oklch(35% 0.05 220)",
+              }}
+            >
+              Access လျှောက်ထားပါ
+            </button>
+          )}
 
           <button
             type="button"
@@ -130,18 +162,20 @@ export default function LoginRequired() {
         </div>
       </div>
 
-      <p className="mt-6 text-xs text-center max-w-sm" style={{ color: "oklch(45% 0.03 220)" }}>
-        Approval email မရသေးပါက{" "}
-        <button
-          type="button"
-          onClick={() => setLocation("/apply")}
-          className="underline hover:text-white transition"
-          style={{ color: "oklch(60% 0.03 220)" }}
-        >
-          /apply
-        </button>{" "}
-        မှ လျှောက်ထားနိုင်ပါသည်။
-      </p>
+      {showApplyCta && (
+        <p className="mt-6 text-xs text-center max-w-sm" style={{ color: "oklch(45% 0.03 220)" }}>
+          Approval email မရသေးပါက{" "}
+          <button
+            type="button"
+            onClick={() => setLocation("/apply")}
+            className="underline hover:text-white transition"
+            style={{ color: "oklch(60% 0.03 220)" }}
+          >
+            /apply
+          </button>{" "}
+          မှ လျှောက်ထားနိုင်ပါသည်။
+        </p>
+      )}
     </div>
   );
 }

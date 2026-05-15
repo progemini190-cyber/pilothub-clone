@@ -30,7 +30,7 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
     if (isAdminShell) return;
     if (user && (user as { status?: string }).status === "pending") {
       window.location.replace(
-        `/login-required?email=${encodeURIComponent(String((user as { email?: string | null }).email ?? ""))}`,
+        `/login-required?reason=pending&email=${encodeURIComponent(String((user as { email?: string | null }).email ?? ""))}`,
       );
     }
   }, [user, isAdminShell]);

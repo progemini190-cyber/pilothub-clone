@@ -72,9 +72,44 @@ export const appRouter = router({
         plan: z.enum(["bizpilot", "founderpilot", "free"]).optional().default("free"),
       }))
       .mutation(async ({ input }) => {
+        const normalizedEmail = db.normalizeEmail(input.email);
+        const existingUser = await db.getUserByEmail(normalizedEmail);
+        if (existingUser) {
+          if (existingUser.status === "active") {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "An account with this email already exists. Please sign in with Google.",
+            });
+          }
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Your application is already on file. Please wait for admin approval, then sign in with Google.",
+          });
+        }
+
+        const existingApplication = await db.getApplicationByEmail(normalizedEmail);
+        if (existingApplication) {
+          if (existingApplication.status === "approved") {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "This email is already approved. Please sign in with Google.",
+            });
+          }
+          if (existingApplication.status === "pending") {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "An application with this email is already pending review. Please wait for admin approval.",
+            });
+          }
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "An application with this email was already reviewed. Contact support if you need access.",
+          });
+        }
+
         const app = await db.createApplication({
           fullName: input.fullName,
-          email: input.email,
+          email: normalizedEmail,
           phone: input.phone,
           businessName: input.businessName,
           businessType: input.businessType,

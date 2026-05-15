@@ -4,6 +4,7 @@ import type { Express, Request, Response } from "express";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { ENV } from "./env";
+import { resolveGoogleLogin } from "./googleLogin";
 import { sdk } from "./sdk";
 
 const GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state";
@@ -377,27 +378,15 @@ export function registerOAuthRoutes(app: Express) {
         return;
       }
 
-      const userEmail = userInfo.email ?? null;
-      let isApproved = false;
-      try {
-        if (userEmail) {
-          const application = await db.getApprovedApplicationByEmail(userEmail);
-          isApproved = !!(application && application.status === "approved");
-        }
-      } catch (dbErr) {
-        console.error("[Google OAuth] getApprovedApplicationByEmail failed (non-fatal):", dbErr);
-      }
+      const login = await resolveGoogleLogin(userInfo);
 
       try {
-        await db.upsertUser({
-          openId: userInfo.sub,
-          name: userInfo.name || null,
-          email: userInfo.email ?? null,
-          loginMethod: "google",
-          lastSignedIn: new Date(),
-          status: isApproved ? "active" : "pending",
+        await db.upsertUser(login.upsert);
+        console.info("[Google OAuth] User upserted", {
+          openId: userInfo.sub.slice(0, 8),
+          isApproved: login.isApproved,
+          userStatus: login.userStatus,
         });
-        console.info("[Google OAuth] User upserted", { openId: userInfo.sub.slice(0, 8), isApproved });
       } catch (dbErr) {
         console.error("[Google OAuth] upsertUser failed:", dbErr);
         throw new Error(
@@ -405,12 +394,9 @@ export function registerOAuthRoutes(app: Express) {
         );
       }
 
-      let redirectPath = "/app";
-      if (!isApproved) {
-        redirectPath = `/login-required?email=${encodeURIComponent(userEmail ?? "")}`;
-      }
+      const redirectPath = login.redirectPath;
 
-      const sessionToken = await sdk.createSessionToken(userInfo.sub, {
+      const sessionToken = await sdk.createSessionToken(login.sessionOpenId, {
         name: userInfo.name || userInfo.email || "User",
         expiresInMs: ONE_YEAR_MS,
       });

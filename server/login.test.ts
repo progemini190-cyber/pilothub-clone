@@ -1,85 +1,138 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock db module
 vi.mock("./db", () => ({
+  normalizeEmail: (email: string) => email.trim().toLowerCase(),
+  getUserByOpenId: vi.fn(),
+  getUserByEmail: vi.fn(),
+  linkUserToGoogleOpenId: vi.fn(),
   getApprovedApplicationByEmail: vi.fn(),
+  getApplicationByEmail: vi.fn(),
   upsertUser: vi.fn(),
 }));
 
 import * as db from "./db";
+import { resolveGoogleLogin } from "./_core/googleLogin";
 
-describe("OAuth login flow - approved email check", () => {
+const googleSub = "google-sub-123";
+
+describe("resolveGoogleLogin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (db.getUserByOpenId as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (db.getUserByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (db.getApprovedApplicationByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (db.getApplicationByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   });
 
-  it("redirects to /app when email has approved application", async () => {
-    (db.getApprovedApplicationByEmail as any).mockResolvedValue({
+  it("redirects to /app when user status is active", async () => {
+    (db.getUserByOpenId as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: 1,
+      openId: googleSub,
       email: "approved@gmail.com",
-      status: "approved",
-      plan: "bizpilot",
+      status: "active",
+      role: "user",
     });
 
-    const app = await db.getApprovedApplicationByEmail("approved@gmail.com");
-    const redirectPath = app && app.status === "approved" ? "/app" : "/login-required?email=approved@gmail.com";
-    expect(redirectPath).toBe("/app");
+    const result = await resolveGoogleLogin({
+      sub: googleSub,
+      email: "approved@gmail.com",
+      name: "Approved User",
+    });
+
+    expect(result.redirectPath).toBe("/app");
+    expect(result.isApproved).toBe(true);
+    expect(result.upsert.status).toBeUndefined();
   });
 
-  it("redirects to /login-required when email has no application", async () => {
-    (db.getApprovedApplicationByEmail as any).mockResolvedValue(undefined);
-
-    const email = "unknown@gmail.com";
-    const app = await db.getApprovedApplicationByEmail(email);
-    const redirectPath = app && app.status === "approved"
-      ? "/app"
-      : `/login-required?email=${encodeURIComponent(email)}`;
-    expect(redirectPath).toBe("/login-required?email=unknown%40gmail.com");
-  });
-
-  it("redirects to /login-required when application is pending (not approved)", async () => {
-    (db.getApprovedApplicationByEmail as any).mockResolvedValue({
+  it("redirects to pending screen when user exists with pending status", async () => {
+    (db.getUserByOpenId as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: 2,
+      openId: googleSub,
       email: "pending@gmail.com",
       status: "pending",
-      plan: "bizpilot",
+      role: "user",
+    });
+    (db.getApplicationByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 10,
+      email: "pending@gmail.com",
+      status: "pending",
     });
 
-    const email = "pending@gmail.com";
-    const app = await db.getApprovedApplicationByEmail(email);
-    const redirectPath = app && app.status === "approved"
-      ? "/app"
-      : `/login-required?email=${encodeURIComponent(email)}`;
-    expect(redirectPath).toBe("/login-required?email=pending%40gmail.com");
+    const result = await resolveGoogleLogin({
+      sub: googleSub,
+      email: "pending@gmail.com",
+    });
+
+    expect(result.redirectPath).toBe("/login-required?reason=pending&email=pending%40gmail.com");
+    expect(result.isApproved).toBe(false);
   });
 
-  it("redirects to /login-required when application is rejected", async () => {
-    (db.getApprovedApplicationByEmail as any).mockResolvedValue({
+  it("links app_* user to Google sub and approves active email user", async () => {
+    (db.getUserByOpenId as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        id: 3,
+        openId: googleSub,
+        email: "linked@gmail.com",
+        status: "active",
+        role: "user",
+      });
+    (db.getUserByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: 3,
-      email: "rejected@gmail.com",
-      status: "rejected",
-      plan: "bizpilot",
+      openId: "app_abc123",
+      email: "linked@gmail.com",
+      status: "active",
+      role: "user",
     });
 
-    const email = "rejected@gmail.com";
-    const app = await db.getApprovedApplicationByEmail(email);
-    const redirectPath = app && app.status === "approved"
-      ? "/app"
-      : `/login-required?email=${encodeURIComponent(email)}`;
-    expect(redirectPath).toBe("/login-required?email=rejected%40gmail.com");
+    const result = await resolveGoogleLogin({
+      sub: googleSub,
+      email: "linked@gmail.com",
+      name: "Linked User",
+    });
+
+    expect(db.linkUserToGoogleOpenId).toHaveBeenCalledWith(3, googleSub, {
+      name: "Linked User",
+      loginMethod: "google",
+    });
+    expect(result.redirectPath).toBe("/app");
+    expect(result.isApproved).toBe(true);
   });
 
-  it("redirects to /login-required when no email from OAuth", () => {
-    const email = null;
-    const redirectPath = email
-      ? "/app"
-      : "/login-required?email=";
-    expect(redirectPath).toBe("/login-required?email=");
+  it("redirects unknown email to not_approved", async () => {
+    const result = await resolveGoogleLogin({
+      sub: googleSub,
+      email: "unknown@gmail.com",
+    });
+
+    expect(result.redirectPath).toBe("/login-required?reason=not_approved&email=unknown%40gmail.com");
+    expect(result.upsert.status).toBe("pending");
   });
 
-  it("getApprovedApplicationByEmail is called with correct email", async () => {
-    (db.getApprovedApplicationByEmail as any).mockResolvedValue(undefined);
-    await db.getApprovedApplicationByEmail("test@example.com");
+  it("approves via approved application when no user row yet", async () => {
+    (db.getApprovedApplicationByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 5,
+      email: "app@gmail.com",
+      status: "approved",
+    });
+
+    const result = await resolveGoogleLogin({
+      sub: googleSub,
+      email: "app@gmail.com",
+    });
+
+    expect(result.redirectPath).toBe("/app");
+    expect(result.isApproved).toBe(true);
+    expect(result.upsert.status).toBe("active");
+  });
+
+  it("looks up user by email with normalized address", async () => {
+    await resolveGoogleLogin({
+      sub: googleSub,
+      email: "Test@Example.com",
+    });
+
+    expect(db.getUserByEmail).toHaveBeenCalledWith("test@example.com");
     expect(db.getApprovedApplicationByEmail).toHaveBeenCalledWith("test@example.com");
   });
 });
@@ -88,7 +141,6 @@ describe("Login button visibility logic", () => {
   it("shows Login button when user is not authenticated", () => {
     const isAuthenticated = false;
     expect(isAuthenticated).toBe(false);
-    // Login button should be shown
     const showLoginButton = !isAuthenticated;
     expect(showLoginButton).toBe(true);
   });
