@@ -27,7 +27,12 @@ class SessionService {
   }
 
   private getSessionSecret() {
-    const secret = ENV.cookieSecret;
+    const secret =
+      (typeof process.env.JWT_SECRET === "string" && process.env.JWT_SECRET.trim()) ||
+      ENV.cookieSecret;
+    if (!secret) {
+      throw new Error("JWT_SECRET is not configured");
+    }
     return new TextEncoder().encode(secret);
   }
 
@@ -79,11 +84,7 @@ class SessionService {
       });
       const { openId, appId, name } = payload as Record<string, unknown>;
 
-      if (
-        !isNonEmptyString(openId) ||
-        !isNonEmptyString(appId) ||
-        !isNonEmptyString(name)
-      ) {
+      if (!isNonEmptyString(openId) || !isNonEmptyString(appId)) {
         console.warn("[Auth] Session payload missing required fields");
         return null;
       }

@@ -125,7 +125,7 @@ import cookieParser from "cookie-parser";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 
 // server/_core/oauth.ts
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 // shared/const.ts
 var COOKIE_NAME = "app_session_id";
@@ -810,7 +810,10 @@ var SessionService = class {
     return new Map(Object.entries(parsed));
   }
   getSessionSecret() {
-    const secret = ENV.cookieSecret;
+    const secret = typeof process.env.JWT_SECRET === "string" && process.env.JWT_SECRET.trim() || ENV.cookieSecret;
+    if (!secret) {
+      throw new Error("JWT_SECRET is not configured");
+    }
     return new TextEncoder().encode(secret);
   }
   async createSessionToken(openId, options = {}) {
@@ -845,7 +848,7 @@ var SessionService = class {
         algorithms: ["HS256"]
       });
       const { openId, appId, name } = payload;
-      if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
+      if (!isNonEmptyString(openId) || !isNonEmptyString(appId)) {
         console.warn("[Auth] Session payload missing required fields");
         return null;
       }
@@ -882,6 +885,7 @@ var sdk = new SessionService();
 
 // server/_core/oauth.ts
 var GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state";
+var GOOGLE_OAUTH_REDIRECT_COOKIE = "google_oauth_redirect_uri";
 var GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 var GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 var GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
@@ -889,26 +893,107 @@ function getQueryParam(req, key) {
   const value = req.query[key];
   return typeof value === "string" ? value : void 0;
 }
+function readEnv(name) {
+  return (process.env[name] ?? "").trim();
+}
 function getPublicOrigin(req) {
+  const configured = readEnv("PUBLIC_APP_URL");
+  if (configured) {
+    try {
+      return new URL(configured).origin;
+    } catch {
+      console.warn("[Google OAuth] PUBLIC_APP_URL is not a valid URL:", configured);
+    }
+  }
+  const vercelUrl = readEnv("VERCEL_URL");
+  if (vercelUrl) {
+    const host2 = vercelUrl.replace(/^https?:\/\//i, "");
+    return `https://${host2}`;
+  }
   const xfProto = req.headers["x-forwarded-proto"];
   const proto = (Array.isArray(xfProto) ? xfProto[0] : xfProto?.split(",")[0])?.trim() || req.protocol || "https";
   const xfHost = req.headers["x-forwarded-host"];
   const host = (Array.isArray(xfHost) ? xfHost[0] : xfHost?.split(",")[0]?.trim()) || req.get("host") || "localhost";
   return `${proto}://${host}`;
 }
-function getGoogleRedirectUri(req) {
-  const configured = ENV.googleRedirectUri?.trim();
-  if (configured) return configured.replace(/\/+$/, "");
+function resolveGoogleRedirectUri(req, cookieRedirectUri) {
+  const fromEnv = readEnv("GOOGLE_REDIRECT_URI") || ENV.googleRedirectUri?.trim();
+  if (fromEnv) return fromEnv.replace(/\/+$/, "");
+  const fromCookie = cookieRedirectUri?.trim();
+  if (fromCookie) return fromCookie.replace(/\/+$/, "");
   return `${getPublicOrigin(req)}/api/oauth/callback`;
 }
 function googleOAuthConfigured() {
-  return Boolean(ENV.googleClientId?.trim() && ENV.googleClientSecret?.trim());
+  const clientId = readEnv("GOOGLE_CLIENT_ID") || ENV.googleClientId;
+  const clientSecret = readEnv("GOOGLE_CLIENT_SECRET") || ENV.googleClientSecret;
+  return Boolean(clientId && clientSecret);
+}
+function getGoogleClientId() {
+  return readEnv("GOOGLE_CLIENT_ID") || ENV.googleClientId;
+}
+function getGoogleClientSecret() {
+  return readEnv("GOOGLE_CLIENT_SECRET") || ENV.googleClientSecret;
+}
+function oauthStateSecret() {
+  const secret = readEnv("JWT_SECRET") || ENV.cookieSecret;
+  return secret.length > 0 ? secret : null;
+}
+function signOAuthPayload(payload) {
+  const secret = oauthStateSecret();
+  if (!secret) return null;
+  const sig = createHmac("sha256", secret).update(payload).digest("hex");
+  return `${payload}.${sig}`;
+}
+function verifyOAuthPayload(signed) {
+  const secret = oauthStateSecret();
+  if (!secret) return null;
+  const lastDot = signed.lastIndexOf(".");
+  if (lastDot <= 0) return null;
+  const payload = signed.slice(0, lastDot);
+  const sig = signed.slice(lastDot + 1);
+  const expected = createHmac("sha256", secret).update(payload).digest("hex");
+  try {
+    const a = Buffer.from(sig, "hex");
+    const b = Buffer.from(expected, "hex");
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+function redirectOAuthError(res, reason, logContext) {
+  if (logContext) {
+    console.error("[Google OAuth] Redirecting with error:", reason, logContext);
+  } else {
+    console.error("[Google OAuth] Redirecting with error:", reason);
+  }
+  const url = new URL("/", getSafeRedirectOrigin());
+  url.searchParams.set("error", "oauth_failed");
+  url.searchParams.set("reason", reason);
+  res.redirect(302, url.toString());
+}
+function getSafeRedirectOrigin() {
+  const fromEnv = readEnv("PUBLIC_APP_URL");
+  if (fromEnv) {
+    try {
+      return new URL(fromEnv).origin;
+    } catch {
+    }
+  }
+  return "https://pilothub.vip";
 }
 async function exchangeCodeForTokens(code, redirectUri) {
+  const clientId = getGoogleClientId();
+  const clientSecret = getGoogleClientSecret();
+  console.info("[Google OAuth] Token exchange", {
+    redirectUri,
+    clientIdPrefix: clientId.slice(0, 12),
+    hasClientSecret: clientSecret.length > 0
+  });
   const body = new URLSearchParams({
     code,
-    client_id: ENV.googleClientId,
-    client_secret: ENV.googleClientSecret,
+    client_id: clientId,
+    client_secret: clientSecret,
     redirect_uri: redirectUri,
     grant_type: "authorization_code"
   });
@@ -917,13 +1002,33 @@ async function exchangeCodeForTokens(code, redirectUri) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body
   });
+  const raw = await res.text();
   if (!res.ok) {
-    const text2 = await res.text();
-    console.error("[Google OAuth] Token exchange failed:", res.status, text2);
-    throw new Error("Google token exchange failed");
+    let parsed = {};
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+    }
+    console.error("[Google OAuth] Token exchange failed", {
+      status: res.status,
+      error: parsed.error,
+      error_description: parsed.error_description,
+      redirectUri,
+      bodyPreview: raw.slice(0, 500)
+    });
+    throw new Error(
+      parsed.error_description || parsed.error || `Google token exchange HTTP ${res.status}`
+    );
   }
-  const json = await res.json();
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    console.error("[Google OAuth] Token response not JSON:", raw.slice(0, 500));
+    throw new Error("Google token response was not valid JSON");
+  }
   if (!json.access_token) {
+    console.error("[Google OAuth] Token response missing access_token:", raw.slice(0, 500));
     throw new Error("Google token response missing access_token");
   }
   return { access_token: json.access_token };
@@ -932,105 +1037,196 @@ async function fetchGoogleUserInfo(accessToken) {
   const res = await fetch(GOOGLE_USERINFO_URL, {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
+  const raw = await res.text();
   if (!res.ok) {
-    const text2 = await res.text();
-    console.error("[Google OAuth] Userinfo failed:", res.status, text2);
-    throw new Error("Google userinfo failed");
+    console.error("[Google OAuth] Userinfo failed", {
+      status: res.status,
+      bodyPreview: raw.slice(0, 500)
+    });
+    throw new Error(`Google userinfo HTTP ${res.status}`);
   }
-  return await res.json();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.error("[Google OAuth] Userinfo not JSON:", raw.slice(0, 500));
+    throw new Error("Google userinfo was not valid JSON");
+  }
+}
+function assertSessionPrerequisites() {
+  const jwt = readEnv("JWT_SECRET") || ENV.cookieSecret;
+  if (!jwt) {
+    throw new Error("JWT_SECRET is not set \u2014 cannot create session cookie");
+  }
+  const clientId = getGoogleClientId();
+  if (!clientId) {
+    throw new Error("GOOGLE_CLIENT_ID is not set \u2014 cannot create session cookie");
+  }
 }
 function registerOAuthRoutes(app2) {
   app2.get("/api/auth/google", (req, res) => {
     if (!googleOAuthConfigured()) {
-      res.status(503).send(
-        "Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."
-      );
+      console.error("[Google OAuth] Start blocked: missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET");
+      redirectOAuthError(res, "not_configured");
       return;
     }
-    const state = randomBytes(32).toString("hex");
-    const redirectUri = getGoogleRedirectUri(req);
+    if (!oauthStateSecret()) {
+      console.error("[Google OAuth] Start blocked: JWT_SECRET is not set");
+      redirectOAuthError(res, "missing_jwt_secret");
+      return;
+    }
+    const stateNonce = randomBytes(32).toString("hex");
+    const redirectUri = resolveGoogleRedirectUri(req);
+    const signedState = signOAuthPayload(`${stateNonce}|${redirectUri}`) ?? stateNonce;
     const cookieOpts = getSessionCookieOptions(req);
-    res.cookie(GOOGLE_OAUTH_STATE_COOKIE, state, {
+    res.cookie(GOOGLE_OAUTH_STATE_COOKIE, signedState, {
       ...cookieOpts,
       maxAge: 10 * 60 * 1e3
     });
+    res.cookie(GOOGLE_OAUTH_REDIRECT_COOKIE, redirectUri, {
+      ...cookieOpts,
+      maxAge: 10 * 60 * 1e3
+    });
+    console.info("[Google OAuth] Starting authorize", { redirectUri, stateNonce: stateNonce.slice(0, 8) });
     const params = new URLSearchParams({
-      client_id: ENV.googleClientId,
+      client_id: getGoogleClientId(),
       redirect_uri: redirectUri,
       response_type: "code",
       scope: ["openid", "email", "profile"].join(" "),
-      state,
+      state: stateNonce,
       prompt: "select_account"
     });
     res.redirect(302, `${GOOGLE_AUTH_ENDPOINT}?${params.toString()}`);
   });
   app2.get("/api/oauth/callback", async (req, res) => {
+    const googleError = getQueryParam(req, "error");
+    if (googleError) {
+      console.error("[Google OAuth] Google returned error", {
+        error: googleError,
+        description: getQueryParam(req, "error_description")
+      });
+      redirectOAuthError(res, googleError, {
+        description: getQueryParam(req, "error_description")
+      });
+      return;
+    }
     const code = getQueryParam(req, "code");
     const state = getQueryParam(req, "state");
     const cookieState = req.cookies?.[GOOGLE_OAUTH_STATE_COOKIE];
-    const clearStateCookie = () => {
+    const cookieRedirect = req.cookies?.[GOOGLE_OAUTH_REDIRECT_COOKIE];
+    const clearOAuthCookies = () => {
       const opts = getSessionCookieOptions(req);
       res.clearCookie(GOOGLE_OAUTH_STATE_COOKIE, { ...opts, maxAge: -1 });
+      res.clearCookie(GOOGLE_OAUTH_REDIRECT_COOKIE, { ...opts, maxAge: -1 });
     };
     if (!code || !state) {
-      clearStateCookie();
-      res.status(400).json({ error: "code and state are required" });
+      clearOAuthCookies();
+      console.error("[Google OAuth] Missing code or state", { hasCode: Boolean(code), hasState: Boolean(state) });
+      redirectOAuthError(res, "missing_code_or_state");
       return;
     }
-    if (!cookieState || cookieState !== state) {
-      clearStateCookie();
-      res.status(400).json({ error: "invalid OAuth state" });
+    const redirectUri = resolveGoogleRedirectUri(req, cookieRedirect);
+    const verifiedPayload = cookieState ? verifyOAuthPayload(cookieState) : null;
+    let stateValid = false;
+    if (verifiedPayload) {
+      const pipe = verifiedPayload.indexOf("|");
+      if (pipe > 0) {
+        const nonce = verifiedPayload.slice(0, pipe);
+        const uriFromCookie = verifiedPayload.slice(pipe + 1);
+        stateValid = nonce === state && uriFromCookie === redirectUri;
+      }
+    } else if (cookieState === state) {
+      stateValid = true;
+    }
+    if (!cookieState || !stateValid) {
+      clearOAuthCookies();
+      console.error("[Google OAuth] Invalid OAuth state", {
+        hasCookie: Boolean(cookieState),
+        stateFromQuery: state.slice(0, 8),
+        cookieRedirect,
+        verifiedPayload: verifiedPayload?.slice(0, 40)
+      });
+      redirectOAuthError(res, "invalid_state");
       return;
     }
     if (!googleOAuthConfigured()) {
-      clearStateCookie();
-      res.status(503).json({ error: "Google OAuth is not configured" });
+      clearOAuthCookies();
+      console.error("[Google OAuth] Callback blocked: OAuth not configured");
+      redirectOAuthError(res, "not_configured");
       return;
     }
-    const redirectUri = getGoogleRedirectUri(req);
     try {
+      assertSessionPrerequisites();
       const { access_token } = await exchangeCodeForTokens(code, redirectUri);
+      console.info("[Google OAuth] Token exchange succeeded");
       const userInfo = await fetchGoogleUserInfo(access_token);
+      console.info("[Google OAuth] Userinfo received", {
+        sub: userInfo.sub?.slice(0, 8),
+        email: userInfo.email,
+        email_verified: userInfo.email_verified
+      });
       if (!userInfo.sub) {
-        clearStateCookie();
-        res.status(400).json({ error: "Google account id (sub) missing" });
+        clearOAuthCookies();
+        redirectOAuthError(res, "missing_sub");
         return;
       }
       if (userInfo.email_verified === false) {
-        clearStateCookie();
+        clearOAuthCookies();
         res.redirect(302, "/login-required?reason=unverified");
         return;
       }
       const userEmail = userInfo.email ?? null;
       let isApproved = false;
-      if (userEmail) {
-        const application = await getApprovedApplicationByEmail(userEmail);
-        isApproved = !!(application && application.status === "approved");
+      try {
+        if (userEmail) {
+          const application = await getApprovedApplicationByEmail(userEmail);
+          isApproved = !!(application && application.status === "approved");
+        }
+      } catch (dbErr) {
+        console.error("[Google OAuth] getApprovedApplicationByEmail failed (non-fatal):", dbErr);
       }
-      await upsertUser({
-        openId: userInfo.sub,
-        name: userInfo.name || null,
-        email: userInfo.email ?? null,
-        loginMethod: "google",
-        lastSignedIn: /* @__PURE__ */ new Date(),
-        status: isApproved ? "active" : "pending"
-      });
+      try {
+        await upsertUser({
+          openId: userInfo.sub,
+          name: userInfo.name || null,
+          email: userInfo.email ?? null,
+          loginMethod: "google",
+          lastSignedIn: /* @__PURE__ */ new Date(),
+          status: isApproved ? "active" : "pending"
+        });
+        console.info("[Google OAuth] User upserted", { openId: userInfo.sub.slice(0, 8), isApproved });
+      } catch (dbErr) {
+        console.error("[Google OAuth] upsertUser failed:", dbErr);
+        throw new Error(
+          `Database upsert failed: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`
+        );
+      }
       let redirectPath = "/app";
       if (!isApproved) {
         redirectPath = `/login-required?email=${encodeURIComponent(userEmail ?? "")}`;
       }
       const sessionToken = await sdk.createSessionToken(userInfo.sub, {
-        name: userInfo.name || "",
+        name: userInfo.name || userInfo.email || "User",
         expiresInMs: ONE_YEAR_MS
       });
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
-      clearStateCookie();
+      clearOAuthCookies();
+      console.info("[Google OAuth] Login complete, redirecting", { redirectPath });
       res.redirect(302, redirectPath);
     } catch (error) {
-      console.error("[Google OAuth] Callback failed", error);
-      clearStateCookie();
-      res.status(500).json({ error: "OAuth callback failed" });
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : void 0;
+      console.error("[Google OAuth] Callback failed", {
+        message,
+        stack,
+        redirectUri,
+        hasCode: true,
+        clientIdPrefix: getGoogleClientId().slice(0, 12),
+        hasJwtSecret: Boolean(readEnv("JWT_SECRET") || ENV.cookieSecret),
+        hasDatabaseUrl: Boolean(readEnv("TURSO_DATABASE_URL") || readEnv("DATABASE_URL"))
+      });
+      clearOAuthCookies();
+      redirectOAuthError(res, "callback_failed", { message });
     }
   });
 }
