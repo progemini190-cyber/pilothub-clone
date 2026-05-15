@@ -79,6 +79,30 @@ const ENDPOINTS = [
   ]
 }`,
   },
+  {
+    method: "POST",
+    path: "/api/external/create-user",
+    auth: "X-API-Key header",
+    description:
+      "Quick-create a shadow user (no Google login), set Telegram plan limits, and return the activation start link for your AI sales agent.",
+    body: `{
+  "email": "customer@example.com",
+  "name": "Ko Aung",
+  "planType": "bizpilot",
+  "bizMessageLimit": 20,
+  "founderMessageLimit": 0,
+  "planExpiryDate": "2026-06-15",
+  "botUsername": "YourBizPilotBot"
+}`,
+    response: `{
+  "success": true,
+  "userId": 42,
+  "created": true,
+  "token": "abc123...",
+  "activationLink": "https://t.me/YourBizPilotBot?start=abc123...",
+  "telegramStartLink": "https://t.me/YourBizPilotBot?start=abc123..."
+}`,
+  },
 ];
 
 export default function AdminExternalAPI() {

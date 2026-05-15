@@ -16,6 +16,7 @@ import * as db from "./db";
 import { nanoid } from "nanoid";
 import { notifyOwner } from "./_core/notification";
 import { generateTelegramActivationToken } from "./telegram";
+import { quickCreateTelegramUser, parsePlanType } from "./quickCreateUser";
 
 // ── API Key auth ──────────────────────────────────────────────────────────────
 function getPublicApiKey(): string {
@@ -77,6 +78,7 @@ export function registerPublicApiRoutes(app: Express) {
         { method: "POST", path: "/api/public/payments/submit", auth: "X-API-Key (public)", description: "Submit a payment" },
         { method: "GET",  path: "/api/public/payments/list", auth: "X-API-Key (admin)", description: "List all payments" },
         { method: "POST", path: "/api/admin/telegram/token", auth: "X-API-Key (admin)", description: "Generate Telegram bot activation token for a user" },
+        { method: "POST", path: "/api/external/create-user", auth: "X-API-Key (public)", description: "Quick-create shadow user + Telegram activation link (AI sales agent)" },
       ],
     });
   });
@@ -258,6 +260,78 @@ export function registerPublicApiRoutes(app: Express) {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Internal server error";
       console.error("[PublicAPI] /admin/telegram/token error:", err);
+      res.status(400).json({ success: false, error: message });
+    }
+  });
+
+  // ── POST /api/external/create-user ──────────────────────────────────────────
+  // AI sales agent: create or find user, set plan limits, return Telegram start link.
+  // Body: { email, name, planType, bizMessageLimit?, founderMessageLimit?, planExpiryDate?, botUsername? }
+  app.post("/api/external/create-user", async (req: Request, res: Response) => {
+    if (!await requireApiKey(req, res)) return;
+    try {
+      const body = req.body as {
+        email?: string;
+        name?: string;
+        planType?: string;
+        bizMessageLimit?: number;
+        founderMessageLimit?: number;
+        planExpiryDate?: string | null;
+        botUsername?: string;
+      };
+
+      if (!body.email?.trim() || !body.name?.trim()) {
+        res.status(400).json({ success: false, error: "email and name are required" });
+        return;
+      }
+
+      let planExpiryDate: Date | null | undefined = undefined;
+      if (body.planExpiryDate !== undefined) {
+        if (body.planExpiryDate === null || body.planExpiryDate === "") {
+          planExpiryDate = null;
+        } else {
+          const d = new Date(
+            body.planExpiryDate.includes("T")
+              ? body.planExpiryDate
+              : `${body.planExpiryDate}T23:59:59`,
+          );
+          if (Number.isNaN(d.getTime())) {
+            res.status(400).json({ success: false, error: "Invalid planExpiryDate" });
+            return;
+          }
+          planExpiryDate = d;
+        }
+      }
+
+      const result = await quickCreateTelegramUser({
+        email: body.email.trim(),
+        name: body.name.trim(),
+        planType: parsePlanType(body.planType),
+        bizMessageLimit:
+          typeof body.bizMessageLimit === "number" ? body.bizMessageLimit : undefined,
+        founderMessageLimit:
+          typeof body.founderMessageLimit === "number"
+            ? body.founderMessageLimit
+            : undefined,
+        planExpiryDate,
+        botUsername: body.botUsername?.trim(),
+      });
+
+      res.json({
+        success: true,
+        userId: result.userId,
+        openId: result.openId,
+        email: result.email,
+        name: result.name,
+        planType: result.planType,
+        created: result.created,
+        token: result.token,
+        activationLink: result.activationLink,
+        telegramStartLink: result.activationLink,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Internal server error";
+      console.error("[ExternalAPI] /create-user error:", err);
       res.status(400).json({ success: false, error: message });
     }
   });

@@ -10,6 +10,7 @@ import {
   setupTelegramWebhook,
   resolveWebhookBaseUrl,
 } from "./telegram";
+import { quickCreateTelegramUser } from "./quickCreateUser";
 import { notifyOwner } from "./_core/notification";
 import { storagePut } from "./storage";
 import { sendApprovalEmail as sendApprovalEmailHelper, sendPaymentConfirmationEmail } from "./emailHelper";
@@ -804,6 +805,47 @@ export const appRouter = router({
             return { success: true };
           } catch (err) {
             const message = err instanceof Error ? err.message : "Failed to update plan";
+            throw new TRPCError({ code: "BAD_REQUEST", message });
+          }
+        }),
+      quickAddUser: publicProcedure
+        .input(
+          z.object({
+            name: z.string().min(1),
+            email: z.string().email(),
+            planType: z.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
+            bizMessageLimit: z.number().int().min(0).default(20),
+            founderMessageLimit: z.number().int().min(0).default(0),
+            planExpiryDate: z.string().optional(),
+            botUsername: z.string().min(1).optional(),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          await requireAdmin(ctx);
+          try {
+            let planExpiryDate: Date | null | undefined = undefined;
+            if (input.planExpiryDate) {
+              const d = new Date(
+                input.planExpiryDate.includes("T")
+                  ? input.planExpiryDate
+                  : `${input.planExpiryDate}T23:59:59`,
+              );
+              if (Number.isNaN(d.getTime())) {
+                throw new Error("Invalid expiry date");
+              }
+              planExpiryDate = d;
+            }
+            return await quickCreateTelegramUser({
+              email: input.email,
+              name: input.name,
+              planType: input.planType,
+              bizMessageLimit: input.bizMessageLimit,
+              founderMessageLimit: input.founderMessageLimit,
+              planExpiryDate,
+              botUsername: input.botUsername,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to create user";
             throw new TRPCError({ code: "BAD_REQUEST", message });
           }
         }),

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { DashboardShell } from "@/components/DashboardShell";
-import { Search, Bot, Copy, Check, Link2, Settings2, Webhook } from "lucide-react";
+import { Search, Bot, Copy, Check, Link2, Settings2, Webhook, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 /** Replace with your Telegram bot username (no @). */
@@ -60,6 +60,13 @@ export default function AdminTelegramBots() {
   const [expiryDate, setExpiryDate] = useState("");
   const [linkModal, setLinkModal] = useState<{ user: TelegramUser; link: string; token: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [quickName, setQuickName] = useState("");
+  const [quickEmail, setQuickEmail] = useState("");
+  const [quickPlanType, setQuickPlanType] = useState<"bizpilot" | "founderpilot">("bizpilot");
+  const [quickBizLimit, setQuickBizLimit] = useState("20");
+  const [quickFounderLimit, setQuickFounderLimit] = useState("0");
+  const [quickExpiry, setQuickExpiry] = useState(toDateInputValue(addMonths(new Date(), 1)));
 
   const {
     data,
@@ -93,6 +100,36 @@ export default function AdminTelegramBots() {
       toast.success(`Webhook registered: ${result.webhookUrl}`);
     },
     onError: (err) => toast.error(err.message || "Webhook setup failed"),
+  });
+
+  const quickAddUser = trpc.admin.telegram.quickAddUser.useMutation({
+    onSuccess: (result) => {
+      refetch();
+      setShowQuickAdd(false);
+      setQuickName("");
+      setQuickEmail("");
+      setQuickPlanType("bizpilot");
+      setQuickBizLimit("20");
+      setQuickFounderLimit("0");
+      setQuickExpiry(toDateInputValue(addMonths(new Date(), 1)));
+      setLinkModal({
+        user: {
+          id: result.userId,
+          email: result.email,
+          name: result.name,
+          telegramChatId: null,
+          bizMessageLimit: parseInt(quickBizLimit, 10) || 20,
+          founderMessageLimit: parseInt(quickFounderLimit, 10) || 0,
+          planTypeBiz: quickPlanType === "bizpilot" ? "starter" : "free",
+          planTypeFounder: quickPlanType === "founderpilot" ? "starter" : "free",
+          planExpiryDate: quickExpiry,
+        },
+        link: result.activationLink,
+        token: result.token,
+      });
+      toast.success(result.created ? "User created" : "Existing user updated");
+    },
+    onError: (err) => toast.error(err.message || "Failed to create user"),
   });
 
   const createToken = trpc.admin.telegram.createActivationToken.useMutation({
@@ -181,6 +218,38 @@ export default function AdminTelegramBots() {
     });
   };
 
+  const openQuickAddModal = () => {
+    setQuickName("");
+    setQuickEmail("");
+    setQuickPlanType("bizpilot");
+    setQuickBizLimit("20");
+    setQuickFounderLimit("0");
+    setQuickExpiry(toDateInputValue(addMonths(new Date(), 1)));
+    setShowQuickAdd(true);
+  };
+
+  const handleQuickAddSave = () => {
+    if (!quickName.trim() || !quickEmail.trim()) {
+      toast.error("Name and email are required");
+      return;
+    }
+    const biz = parseInt(quickBizLimit, 10);
+    const founder = parseInt(quickFounderLimit, 10);
+    if (Number.isNaN(biz) || biz < 0 || Number.isNaN(founder) || founder < 0) {
+      toast.error("Enter valid limits");
+      return;
+    }
+    quickAddUser.mutate({
+      name: quickName.trim(),
+      email: quickEmail.trim(),
+      planType: quickPlanType,
+      bizMessageLimit: biz,
+      founderMessageLimit: founder,
+      planExpiryDate: quickExpiry || undefined,
+      botUsername: YOUR_BOT_USERNAME,
+    });
+  };
+
   if (isError) {
     const message = error?.message ?? "Unknown error";
     const isAuth = message.toLowerCase().includes("admin") || message.toLowerCase().includes("unauthorized");
@@ -228,6 +297,18 @@ export default function AdminTelegramBots() {
             . Set <code>TELEGRAM_BIZPILOT_TOKEN</code> and <code>PUBLIC_APP_URL</code> in .env for Setup Bot.
           </p>
           <div className="flex flex-wrap gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={openQuickAddModal}
+              className="px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+              style={{
+                background: "oklch(72% 0.18 162)",
+                color: "oklch(12% 0.03 220)",
+              }}
+            >
+              <UserPlus className="w-4 h-4" />
+              Quick Add User
+            </button>
             <button
               type="button"
               onClick={() => syncSchema.mutate()}
@@ -427,6 +508,86 @@ export default function AdminTelegramBots() {
           )}
         </div>
       </div>
+
+      {showQuickAdd && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "oklch(0% 0 0 / 0.7)" }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowQuickAdd(false);
+          }}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl p-6 space-y-5"
+            style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(28% 0.04 220)" }}
+          >
+            <div>
+              <h2 className="text-lg font-bold text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                Quick Add User
+              </h2>
+              <p className="text-xs mt-1" style={{ color: "oklch(55% 0.03 220)" }}>
+                Creates a shadow account (no Google login) and generates a Telegram activation link.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(65% 0.03 220)" }}>Name *</label>
+                <input value={quickName} onChange={(e) => setQuickName(e.target.value)} placeholder="Customer name" style={inputStyle} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(65% 0.03 220)" }}>Email *</label>
+                <input type="email" value={quickEmail} onChange={(e) => setQuickEmail(e.target.value)} placeholder="user@example.com" style={inputStyle} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(65% 0.03 220)" }}>Primary plan</label>
+                <select
+                  value={quickPlanType}
+                  onChange={(e) => {
+                    const p = e.target.value as "bizpilot" | "founderpilot";
+                    setQuickPlanType(p);
+                    if (p === "bizpilot") {
+                      setQuickBizLimit("20");
+                      setQuickFounderLimit("0");
+                    } else {
+                      setQuickBizLimit("0");
+                      setQuickFounderLimit("20");
+                    }
+                  }}
+                  style={inputStyle}
+                >
+                  <option value="bizpilot">BizPilot</option>
+                  <option value="founderpilot">FounderPilot</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(65% 0.22 250)" }}>Biz limit</label>
+                  <input type="number" min={0} value={quickBizLimit} onChange={(e) => setQuickBizLimit(e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(78% 0.12 75)" }}>Founder limit</label>
+                  <input type="number" min={0} value={quickFounderLimit} onChange={(e) => setQuickFounderLimit(e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold" style={{ color: "oklch(65% 0.03 220)" }}>Expiry</label>
+                  <button type="button" onClick={() => setQuickExpiry(toDateInputValue(addMonths(new Date(), 1)))} className="text-xs underline" style={{ color: "oklch(72% 0.18 162)" }}>+1 month</button>
+                </div>
+                <input type="date" value={quickExpiry} onChange={(e) => setQuickExpiry(e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setShowQuickAdd(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "oklch(22% 0.05 220)", color: "oklch(65% 0.03 220)", border: "1px solid oklch(28% 0.04 220)" }}>Cancel</button>
+              <button type="button" onClick={handleQuickAddSave} disabled={quickAddUser.isPending} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)", opacity: quickAddUser.isPending ? 0.7 : 1 }}>
+                {quickAddUser.isPending ? "Saving…" : "Save & Get Link"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {manageUser && (
         <div
