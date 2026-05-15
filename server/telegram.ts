@@ -78,10 +78,37 @@ export function getTelegramBotToken(advisor: AdvisorSlug): string | undefined {
   );
 }
 
-function parseAdvisor(req: Request): AdvisorSlug {
-  const raw = (req.query.advisor as string | undefined)?.toLowerCase();
-  if (raw === "founderpilot") return "founderpilot";
+function normalizeAdvisorSlug(raw: string | undefined): AdvisorSlug {
+  const r = raw?.toLowerCase().trim();
+  if (r === "founderpilot") return "founderpilot";
   return "bizpilot";
+}
+
+/**
+ * Resolve `advisor` query reliably (Vercel/Express sometimes omit parsed `req.query`).
+ */
+function extractAdvisorQuery(req: Request): string | undefined {
+  try {
+    const pathWithQuery = req.originalUrl ?? req.url ?? "";
+    if (pathWithQuery) {
+      const absolute =
+        pathWithQuery.startsWith("http://") || pathWithQuery.startsWith("https://")
+          ? pathWithQuery
+          : `http://internal${pathWithQuery.startsWith("/") ? "" : "/"}${pathWithQuery}`;
+      const advisorParam = new URL(absolute).searchParams.get("advisor");
+      if (advisorParam?.trim()) return advisorParam.trim();
+    }
+  } catch (err) {
+    console.warn("[Telegram] extractAdvisorQuery failed:", err);
+  }
+  const q = req.query?.advisor;
+  if (typeof q === "string" && q.trim()) return q.trim();
+  if (Array.isArray(q) && typeof q[0] === "string" && q[0].trim()) return q[0].trim();
+  return undefined;
+}
+
+function parseAdvisor(req: Request): AdvisorSlug {
+  return normalizeAdvisorSlug(extractAdvisorQuery(req));
 }
 
 function parseStartToken(text: string): string | null {
@@ -176,7 +203,8 @@ async function handleStartLink(
 async function handleChatMessage(
   chatId: string,
   userText: string,
-  advisor: AdvisorSlug,
+  advisorSlug: AdvisorSlug,
+  advisorQuery: string | undefined,
   botToken: string,
 ): Promise<void> {
   const user = await safeGetUserByTelegramChatId(chatId);
@@ -185,17 +213,18 @@ async function handleChatMessage(
     return;
   }
 
-  const isBiz = String(advisor).includes("biz");
-  const currentLimit = db.coerceTelegramMessageLimit(
-    isBiz ? user.bizMessageLimit : user.founderMessageLimit,
-  );
+  const isBiz = !advisorQuery || advisorQuery.toLowerCase().includes("biz");
+  const currentLimit = isBiz
+    ? Number(user.bizMessageLimit) || 0
+    : Number(user.founderMessageLimit) || 0;
   const isExpired = user.planExpiryDate
-    ? new Date(user.planExpiryDate).getTime() < Date.now()
+    ? new Date(user.planExpiryDate) < new Date()
     : false;
 
   console.log("Credit check:", {
     userId: user.id,
-    advisor,
+    advisorQuery,
+    advisorSlug,
     isBiz,
     currentLimit,
     bizMessageLimit: user.bizMessageLimit,
@@ -207,7 +236,8 @@ async function handleChatMessage(
   if (currentLimit <= 0 || isExpired) {
     console.log("[Telegram] Credit check failed — denying access", {
       userId: user.id,
-      advisor,
+      advisorQuery,
+      advisorSlug,
       currentLimit,
       isExpired,
     });
@@ -215,9 +245,9 @@ async function handleChatMessage(
     return;
   }
 
-  const systemPrompt = await db.getActiveSystemPrompt(advisor);
+  const systemPrompt = await db.getActiveSystemPrompt(advisorSlug);
   const fallback =
-    advisor === "bizpilot"
+    advisorSlug === "bizpilot"
       ? "You are BizPilot, an expert business advisor for Myanmar businesses."
       : "You are FounderPilot, a strategic advisor for founders and CEOs.";
 
@@ -227,7 +257,7 @@ async function handleChatMessage(
     user.businessName ? `- Business Name: ${user.businessName}` : null,
     user.businessType ? `- Business Type: ${user.businessType}` : null,
     user.useCase ? `- How they use PilotHub: ${user.useCase}` : null,
-    `- Channel: Telegram (${advisor})`,
+    `- Channel: Telegram (${advisorSlug})`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -242,7 +272,7 @@ async function handleChatMessage(
 
   let reply: string;
   try {
-    reply = await invokeAdvisorLLM(advisor, llmMessages);
+    reply = await invokeAdvisorLLM(advisorSlug, llmMessages);
   } catch (err) {
     console.error("[Telegram] LLM error:", err);
     await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
@@ -253,15 +283,17 @@ async function handleChatMessage(
   if (!sent) {
     console.error("[Telegram] Gemini reply was not delivered; limit not decremented", {
       userId: user.id,
-      advisor,
+      advisorSlug,
     });
     return;
   }
 
-  await db.decrementTelegramMessageLimit(user.id, advisor);
+  const advisorForDecrement: AdvisorSlug = isBiz ? "bizpilot" : "founderpilot";
+  await db.decrementTelegramMessageLimit(user.id, advisorForDecrement);
   console.log("[Telegram] Message limit decremented after successful delivery", {
     userId: user.id,
-    advisor,
+    advisorForDecrement,
+    isBiz,
   });
 }
 
@@ -285,7 +317,8 @@ async function handleBareStart(chatId: string, botToken: string): Promise<void> 
 
 async function processUpdate(
   update: TelegramUpdate,
-  advisor: AdvisorSlug,
+  advisorSlug: AdvisorSlug,
+  advisorQuery: string | undefined,
   botToken: string,
 ): Promise<void> {
   const message = update?.message;
@@ -313,7 +346,7 @@ async function processUpdate(
     return;
   }
 
-  await handleChatMessage(chatId, text, advisor, botToken);
+  await handleChatMessage(chatId, text, advisorSlug, advisorQuery, botToken);
 }
 
 export function registerTelegramRoutes(app: Express): void {
@@ -327,7 +360,9 @@ export function registerTelegramRoutes(app: Express): void {
       const body = req.body as { message?: { text?: string; chat?: { id?: number } } };
       if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
         await ensureTelegramSchema();
+        const advisorQuery = extractAdvisorQuery(req);
         const advisor = parseAdvisor(req);
+        console.log("[Telegram] Contact tap advisor:", { advisorQuery, advisor });
         botToken = getTelegramBotToken(advisor);
         chatId =
           body.message.chat?.id != null ? String(body.message.chat.id) : undefined;
@@ -343,7 +378,9 @@ export function registerTelegramRoutes(app: Express): void {
 
       await ensureTelegramSchema();
 
+      const advisorQuery = extractAdvisorQuery(req);
       const advisor = parseAdvisor(req);
+      console.log("[Telegram] Webhook advisor:", { advisorQuery, advisor });
       botToken = getTelegramBotToken(advisor);
       if (!botToken) {
         console.error(
@@ -354,7 +391,7 @@ export function registerTelegramRoutes(app: Express): void {
 
       const update = (req.body ?? {}) as TelegramUpdate;
       chatId = extractChatId(update);
-      await processUpdate(update, advisor, botToken);
+      await processUpdate(update, advisor, advisorQuery, botToken);
     } catch (err) {
       console.error("[Telegram] Webhook processing error:", err);
       if (botToken && chatId) {
