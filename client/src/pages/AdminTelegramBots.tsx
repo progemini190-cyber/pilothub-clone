@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { DashboardShell } from "@/components/DashboardShell";
-import { Search, Bot, Copy, Check, Link2, Settings2 } from "lucide-react";
+import { Search, Bot, Copy, Check, Link2, Settings2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 
 /** Replace with your Telegram bot username (no @). */
@@ -78,6 +78,21 @@ export default function AdminTelegramBots() {
       toast.success("Telegram plan updated");
     },
     onError: (err) => toast.error(err.message || "Update failed"),
+  });
+
+  const syncSchema = trpc.admin.telegram.syncSchema.useMutation({
+    onSuccess: () => {
+      refetch();
+      toast.success("Database schema synced");
+    },
+    onError: (err) => toast.error(err.message || "Schema sync failed"),
+  });
+
+  const setupWebhook = trpc.admin.telegram.setupWebhook.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Webhook registered: ${result.webhookUrl}`);
+    },
+    onError: (err) => toast.error(err.message || "Webhook setup failed"),
   });
 
   const createToken = trpc.admin.telegram.createActivationToken.useMutation({
@@ -204,14 +219,43 @@ export default function AdminTelegramBots() {
   return (
     <DashboardShell title="Telegram Bots" activeTab="telegram-bots" isAdminShell>
       <div className="space-y-6">
-        <div>
-          <p className="text-sm" style={{ color: "oklch(55% 0.03 220)" }}>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <p className="text-sm flex-1" style={{ color: "oklch(55% 0.03 220)" }}>
             Manage Telegram users, limits, and expiry. Bot username in links:{" "}
             <code className="text-xs px-1.5 py-0.5 rounded" style={{ background: "oklch(22% 0.05 220)", color: "oklch(72% 0.18 162)" }}>
               {YOUR_BOT_USERNAME}
             </code>
-            {" "}(edit constant at top of <code>AdminTelegramBots.tsx</code>)
+            . Set <code>TELEGRAM_BIZPILOT_TOKEN</code> and <code>PUBLIC_APP_URL</code> in .env for Setup Bot.
           </p>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => syncSchema.mutate()}
+              disabled={syncSchema.isPending}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{
+                background: "oklch(22% 0.05 220)",
+                color: "oklch(65% 0.03 220)",
+                border: "1px solid oklch(28% 0.04 220)",
+              }}
+            >
+              {syncSchema.isPending ? "Syncing…" : "Sync Schema"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setupWebhook.mutate({ advisor: "bizpilot" })}
+              disabled={setupWebhook.isPending}
+              className="px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+              style={{
+                background: "oklch(65% 0.22 250 / 0.12)",
+                color: "oklch(65% 0.22 250)",
+                border: "1px solid oklch(65% 0.22 250 / 0.3)",
+              }}
+            >
+              <Webhook className="w-4 h-4" />
+              {setupWebhook.isPending ? "Setting up…" : "Setup Bot"}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3">

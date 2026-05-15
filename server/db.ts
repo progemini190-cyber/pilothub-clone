@@ -893,24 +893,26 @@ export function hasTelegramCredits(
   return limit > 0 && planType !== "free";
 }
 
-export async function listTelegramBotUsers() {
+export type TelegramAdminUserRow = {
+  id: number;
+  email: string | null;
+  name: string | null;
+  telegramChatId: string | null;
+  bizMessageLimit: number;
+  founderMessageLimit: number;
+  planTypeBiz: string;
+  planTypeFounder: string;
+  planExpiryDate: string | null;
+};
+
+export async function listTelegramBotUsers(): Promise<TelegramAdminUserRow[]> {
   const { ensureTelegramSchema } = await import("./db/ensureTelegramSchema");
   await ensureTelegramSchema();
-  const database = await assertDatabase();
-  return database
-    .select({
-      id: users.id,
-      email: users.email,
-      name: users.name,
-      telegramChatId: users.telegramChatId,
-      bizMessageLimit: users.bizMessageLimit,
-      founderMessageLimit: users.founderMessageLimit,
-      planTypeBiz: users.planTypeBiz,
-      planTypeFounder: users.planTypeFounder,
-      planExpiryDate: users.planExpiryDate,
-    })
-    .from(users)
-    .orderBy(desc(users.createdAt));
+
+  const all = await listAllUsers();
+  return all
+    .map((u) => mapUserToTelegramRow(u))
+    .sort((a, b) => b.id - a.id);
 }
 
 /** Fallback mapper when selective telegram columns are unavailable. */
@@ -923,8 +925,15 @@ export function mapUserToTelegramRow(user: {
   founderMessageLimit?: number | null;
   planTypeBiz?: string | null;
   planTypeFounder?: string | null;
-  planExpiryDate?: Date | null;
-}) {
+  planExpiryDate?: Date | string | number | null;
+}): TelegramAdminUserRow {
+  let planExpiryDate: string | null = null;
+  if (user.planExpiryDate != null) {
+    const d = new Date(user.planExpiryDate);
+    if (!Number.isNaN(d.getTime())) {
+      planExpiryDate = d.toISOString();
+    }
+  }
   return {
     id: user.id,
     email: user.email ?? null,
@@ -934,7 +943,7 @@ export function mapUserToTelegramRow(user: {
     founderMessageLimit: user.founderMessageLimit ?? 5,
     planTypeBiz: user.planTypeBiz ?? "free",
     planTypeFounder: user.planTypeFounder ?? "free",
-    planExpiryDate: user.planExpiryDate ?? null,
+    planExpiryDate,
   };
 }
 

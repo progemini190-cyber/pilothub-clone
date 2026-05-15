@@ -41,6 +41,15 @@ describe("hasTelegramCredits", () => {
     ).toBe(false);
   });
 
+  it("treats null plan expiry as active", () => {
+    expect(
+      hasTelegramCredits(
+        { bizMessageLimit: 20, planTypeBiz: "starter", planExpiryDate: null },
+        "bizpilot",
+      ),
+    ).toBe(true);
+  });
+
   it("denies when plan expiry date has passed", () => {
     const yesterday = new Date(Date.now() - 86400000);
     expect(isTelegramPlanActive(yesterday)).toBe(false);

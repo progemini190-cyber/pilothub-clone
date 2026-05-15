@@ -5,6 +5,7 @@
  */
 
 import type { Express, Request, Response } from "express";
+import { getPublicOrigin } from "./_core/oauth";
 import { nanoid } from "nanoid";
 import * as db from "./db";
 import type { AdvisorSlug } from "./db";
@@ -13,8 +14,8 @@ import { invokeAdvisorLLM } from "./llmWithApiKey";
 
 const NO_ACCESS_MSG =
   "လူကြီးမင်း၏ အသုံးပြုခွင့် ကုန်ဆုံးသွားပါပြီ။ ထပ်မံဝယ်ယူရန် ChatPilot သို့ ဆက်သွယ်ပါ။";
-const NOT_LINKED_MSG =
-  "အကောင့်မချိတ်ဆက်ရသေးပါ။ Admin ထံမှ ရရှိသော activation link ဖြင့် /start TOKEN နှင့်ချိတ်ဆက်ပါ။";
+const NO_USER_FOUND_MSG =
+  "ဒီ Bot ကို အသုံးပြုဖို့ Website မှာ အရင် Register လုပ်ပေးပါ သို့မဟုတ် ChatPilot Agency သို့ ဆက်သွယ်ပါ။";
 const LINK_SUCCESS_MSG =
   "အကောင့်ချိတ်ဆက်မှု အောင်မြင်ပါသည်။ စတင်မေးမြန်းနိုင်ပါပြီ။";
 const INVALID_TOKEN_MSG =
@@ -108,9 +109,15 @@ async function handleChatMessage(
   advisor: AdvisorSlug,
   botToken: string,
 ): Promise<void> {
-  const user = await db.getUserByTelegramChatId(chatId);
+  let user;
+  try {
+    user = await db.getUserByTelegramChatId(chatId);
+  } catch (err) {
+    console.error("[Telegram] getUserByTelegramChatId failed:", err);
+    user = undefined;
+  }
   if (!user) {
-    await sendTelegramMessage(botToken, chatId, NOT_LINKED_MSG);
+    await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
     return;
   }
 
@@ -211,6 +218,66 @@ export function buildTelegramActivationLink(token: string, botUsername?: string)
     process.env.TELEGRAM_BIZ_BOT_USERNAME?.trim() ||
     TELEGRAM_BOT_USERNAME_PLACEHOLDER;
   return `https://t.me/${username}?start=${token}`;
+}
+
+export function resolveWebhookBaseUrl(req?: Request): string {
+  const explicit =
+    process.env.WEBHOOK_BASE_URL?.trim() ||
+    process.env.PUBLIC_APP_URL?.trim();
+  if (explicit) {
+    try {
+      return new URL(explicit).origin;
+    } catch {
+      console.warn("[Telegram] WEBHOOK_BASE_URL / PUBLIC_APP_URL invalid:", explicit);
+    }
+  }
+  if (req) {
+    return getPublicOrigin(req);
+  }
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) {
+    const host = vercel.replace(/^https?:\/\//i, "");
+    return `https://${host}`;
+  }
+  throw new Error(
+    "Cannot determine public URL. Set WEBHOOK_BASE_URL or PUBLIC_APP_URL (e.g. https://your-domain.com)",
+  );
+}
+
+export async function setupTelegramWebhook(
+  advisor: AdvisorSlug,
+  baseUrl: string,
+): Promise<{ ok: true; webhookUrl: string; description?: string }> {
+  const botToken = getTelegramBotToken(advisor);
+  if (!botToken) {
+    throw new Error(
+      advisor === "bizpilot"
+        ? "TELEGRAM_BIZPILOT_TOKEN is not set in environment"
+        : "TELEGRAM_FOUNDERPILOT_TOKEN is not set in environment",
+    );
+  }
+
+  const webhookUrl = `${baseUrl.replace(/\/$/, "")}/api/telegram/webhook?advisor=${advisor}`;
+  const apiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
+
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
+  });
+
+  const data = (await response.json()) as {
+    ok?: boolean;
+    description?: string;
+    result?: boolean;
+  };
+
+  if (!response.ok || !data.ok) {
+    throw new Error(data.description ?? `Telegram setWebhook failed (${response.status})`);
+  }
+
+  console.info("[Telegram] Webhook registered", { advisor, webhookUrl });
+  return { ok: true, webhookUrl, description: data.description };
 }
 
 export async function generateTelegramActivationToken(

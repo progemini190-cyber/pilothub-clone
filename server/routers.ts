@@ -5,7 +5,11 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import * as db from "./db";
 import { invokeAdvisorLLM } from "./llmWithApiKey";
-import { generateTelegramActivationToken } from "./telegram";
+import {
+  generateTelegramActivationToken,
+  setupTelegramWebhook,
+  resolveWebhookBaseUrl,
+} from "./telegram";
 import { notifyOwner } from "./_core/notification";
 import { storagePut } from "./storage";
 import { sendApprovalEmail as sendApprovalEmailHelper, sendPaymentConfirmationEmail } from "./emailHelper";
@@ -733,15 +737,34 @@ export const appRouter = router({
     telegram: router({
       list: publicProcedure.query(async ({ ctx }) => {
         await requireAdmin(ctx);
-        try {
-          const users = await db.listTelegramBotUsers();
-          return { users };
-        } catch (err) {
-          console.error("[Admin] telegram.list failed, falling back to listAllUsers:", err);
-          const all = await db.listAllUsers();
-          return { users: all.map((u) => db.mapUserToTelegramRow(u)) };
-        }
+        const users = await db.listTelegramBotUsers();
+        return { users };
       }),
+      syncSchema: publicProcedure.mutation(async ({ ctx }) => {
+        await requireAdmin(ctx);
+        const { ensureTelegramSchema, resetTelegramSchemaCache } = await import(
+          "./db/ensureTelegramSchema"
+        );
+        resetTelegramSchemaCache();
+        await ensureTelegramSchema();
+        return { success: true };
+      }),
+      setupWebhook: publicProcedure
+        .input(
+          z.object({
+            advisor: z.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          await requireAdmin(ctx);
+          try {
+            const baseUrl = resolveWebhookBaseUrl(ctx.req);
+            return await setupTelegramWebhook(input.advisor, baseUrl);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Webhook setup failed";
+            throw new TRPCError({ code: "BAD_REQUEST", message });
+          }
+        }),
       updatePlan: publicProcedure
         .input(
           z.object({

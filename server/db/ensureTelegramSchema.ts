@@ -1,7 +1,17 @@
+import { createClient } from "@libsql/client";
 import { sql } from "drizzle-orm";
-import { getDb, getDatabaseProvider } from "./connection";
+import {
+  getDb,
+  getDatabaseProvider,
+  getMysqlPool,
+  resolveTursoConfig,
+} from "./connection";
 
 let _ready = false;
+
+export function resetTelegramSchemaCache(): void {
+  _ready = false;
+}
 
 function isBenignMigrationError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
@@ -12,39 +22,70 @@ function isBenignMigrationError(err: unknown): boolean {
   );
 }
 
-async function runStatement(db: AppDatabase, statement: string) {
-  const query = sql.raw(statement);
+async function runTurso(statement: string): Promise<void> {
+  const config = resolveTursoConfig();
+  if (!config) return;
+  const client = createClient({
+    url: config.url,
+    authToken: config.authToken,
+  });
   try {
-    if (typeof (db as { execute?: (q: typeof query) => Promise<unknown> }).execute === "function") {
-      await (db as { execute: (q: typeof query) => Promise<unknown> }).execute(query);
-    } else if (typeof (db as { run?: (q: typeof query) => Promise<unknown> }).run === "function") {
-      await (db as { run: (q: typeof query) => Promise<unknown> }).run(query);
-    } else {
-      throw new Error("Database driver does not support raw SQL execution");
+    await client.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError(err)) throw err;
+  }
+}
+
+async function runMysql(statement: string): Promise<void> {
+  const pool = getMysqlPool();
+  if (!pool) return;
+  try {
+    await pool.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError(err)) throw err;
+  }
+}
+
+async function runDrizzle(statement: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const query = sql.raw(statement);
+  const d = db as {
+    execute?: (q: typeof query) => Promise<unknown>;
+    run?: (q: typeof query) => Promise<unknown>;
+  };
+  try {
+    if (typeof d.execute === "function") {
+      await d.execute(query);
+    } else if (typeof d.run === "function") {
+      await d.run(query);
     }
   } catch (err) {
     if (!isBenignMigrationError(err)) throw err;
   }
 }
 
-type AppDatabase = {
-  execute?: (query: ReturnType<typeof sql.raw>) => Promise<unknown>;
-  run?: (query: ReturnType<typeof sql.raw>) => Promise<unknown>;
-};
+async function runStatement(statement: string): Promise<void> {
+  const provider = getDatabaseProvider();
+  if (provider === "mysql") {
+    await runMysql(statement);
+  } else if (resolveTursoConfig()) {
+    await runTurso(statement);
+  } else {
+    await runDrizzle(statement);
+  }
+}
 
-/** Ensures Telegram columns/tables exist (safe to call repeatedly). */
+/** Ensures Telegram columns/tables exist on Turso/MySQL (idempotent). */
 export async function ensureTelegramSchema(): Promise<void> {
   if (_ready) return;
-  const db = await getDb();
-  if (!db) return;
 
   const provider = getDatabaseProvider();
 
   if (provider === "mysql") {
-    await runStatement(db, "ALTER TABLE `users` ADD COLUMN `telegramChatId` varchar(64)");
-    await runStatement(db, "ALTER TABLE `users` ADD COLUMN `planExpiryDate` timestamp NULL");
+    await runStatement("ALTER TABLE `users` ADD COLUMN `telegramChatId` varchar(64)");
+    await runStatement("ALTER TABLE `users` ADD COLUMN `planExpiryDate` timestamp NULL");
     await runStatement(
-      db,
       `CREATE TABLE IF NOT EXISTS \`bot_activation_tokens\` (
         \`id\` int AUTO_INCREMENT PRIMARY KEY,
         \`token\` varchar(64) NOT NULL UNIQUE,
@@ -54,24 +95,22 @@ export async function ensureTelegramSchema(): Promise<void> {
       )`,
     );
   } else {
-    await runStatement(db, "ALTER TABLE `users` ADD `telegramChatId` text");
-    await runStatement(db, "ALTER TABLE `users` ADD `planExpiryDate` integer");
+    await runStatement("ALTER TABLE `users` ADD COLUMN `telegramChatId` text");
+    await runStatement("ALTER TABLE `users` ADD COLUMN `planExpiryDate` integer");
     await runStatement(
-      db,
       `CREATE TABLE IF NOT EXISTS \`bot_activation_tokens\` (
         \`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-        \`token\` text(64) NOT NULL,
+        \`token\` text NOT NULL,
         \`userId\` integer NOT NULL,
         \`isUsed\` text DEFAULT 'false' NOT NULL,
         \`createdAt\` integer NOT NULL
       )`,
     );
     await runStatement(
-      db,
       "CREATE UNIQUE INDEX IF NOT EXISTS `bot_activation_tokens_token_unique` ON `bot_activation_tokens` (`token`)",
     );
   }
 
   _ready = true;
-  console.info("[Database] Telegram schema ready");
+  console.info("[Database] Telegram schema synced", { provider: provider ?? "turso" });
 }
