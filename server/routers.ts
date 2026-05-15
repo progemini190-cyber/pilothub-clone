@@ -736,6 +736,20 @@ export const appRouter = router({
 
     // ── Telegram bot management ──
     telegram: router({
+      getSettings: publicProcedure.query(async ({ ctx }) => {
+        await requireAdmin(ctx);
+        const { getTelegramBizBotUsername, getTelegramFounderBotUsername } = await import(
+          "./telegram"
+        );
+        const { isTelegramBotUsernameConfigured } = await import("@shared/telegramConfig");
+        const bizBotUsername = getTelegramBizBotUsername();
+        const founderBotUsername = getTelegramFounderBotUsername();
+        return {
+          bizBotUsername,
+          founderBotUsername,
+          bizBotUsernameConfigured: isTelegramBotUsernameConfigured(bizBotUsername),
+        };
+      }),
       list: publicProcedure.query(async ({ ctx }) => {
         await requireAdmin(ctx);
         const users = await db.listTelegramBotUsers();

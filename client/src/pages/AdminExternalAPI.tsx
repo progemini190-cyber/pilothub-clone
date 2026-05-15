@@ -92,7 +92,7 @@ const ENDPOINTS = [
   "bizMessageLimit": 20,
   "founderMessageLimit": 0,
   "planExpiryDate": "2026-06-15",
-  "botUsername": "YourBizPilotBot"
+  "botUsername": "(optional — defaults to NEXT_PUBLIC_TELEGRAM_BOT_USERNAME)"
 }`,
     response: `{
   "success": true,

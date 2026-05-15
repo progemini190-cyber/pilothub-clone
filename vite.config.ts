@@ -7,6 +7,8 @@ import { defineConfig } from "vite";
 const plugins = [react(), tailwindcss(), jsxLocPlugin()];
 
 export default defineConfig({
+  /** Expose NEXT_PUBLIC_* to the client (same as Create React App / Next.js naming). */
+  envPrefix: ["VITE_", "NEXT_PUBLIC_"],
   plugins,
   resolve: {
     alias: {

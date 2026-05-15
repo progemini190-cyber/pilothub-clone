@@ -17,6 +17,8 @@ import { nanoid } from "nanoid";
 import { notifyOwner } from "./_core/notification";
 import { generateTelegramActivationToken } from "./telegram";
 import { quickCreateTelegramUser, parsePlanType } from "./quickCreateUser";
+import { getTelegramBizBotUsername } from "./telegram";
+import { isTelegramBotUsernameConfigured } from "@shared/telegramConfig";
 
 // ── API Key auth ──────────────────────────────────────────────────────────────
 function getPublicApiKey(): string {
@@ -64,9 +66,14 @@ export function registerPublicApiRoutes(app: Express) {
 
   // ── GET /api/public/info ───────────────────────────────────────────────────
   app.get("/api/public/info", (_req: Request, res: Response) => {
+    const bizBotUsername = getTelegramBizBotUsername();
     res.json({
       name: "PilotHub Public API",
       version: "2.0.0",
+      telegram: {
+        bizBotUsername,
+        bizBotUsernameConfigured: isTelegramBotUsernameConfigured(bizBotUsername),
+      },
       plans: [
         { id: "bizpilot", name: "BizPilot", price: 100000, currency: "MMK" },
         { id: "founderpilot", name: "FounderPilot", price: 300000, currency: "MMK" },
@@ -326,6 +333,7 @@ export function registerPublicApiRoutes(app: Express) {
         planType: result.planType,
         created: result.created,
         token: result.token,
+        botUsername: getTelegramBizBotUsername(),
         activationLink: result.activationLink,
         telegramStartLink: result.activationLink,
       });

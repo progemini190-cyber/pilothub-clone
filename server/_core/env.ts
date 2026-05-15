@@ -35,4 +35,13 @@ export const ENV = {
     process.env.TELEGRAM_FOUNDERPILOT_TOKEN ??
     process.env.TELEGRAM_FOUNDER_BOT_TOKEN ??
     "",
+
+  /** BizPilot @username without @ — used in t.me activation links. */
+  telegramBizBotUsername:
+    process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ??
+    process.env.VITE_TELEGRAM_BOT_USERNAME ??
+    process.env.TELEGRAM_BIZPILOT_BOT_USERNAME ??
+    process.env.TELEGRAM_BIZ_BOT_USERNAME ??
+    process.env.TELEGRAM_BOT_USERNAME ??
+    "",
 };

@@ -11,6 +11,14 @@ import * as db from "./db";
 import type { AdvisorSlug } from "./db";
 import { ensureTelegramSchema } from "./db/ensureTelegramSchema";
 import { invokeAdvisorLLM } from "./llmWithApiKey";
+import {
+  buildTelegramStartLink,
+  resolveTelegramBizBotUsername,
+  resolveTelegramFounderBotUsername,
+  TELEGRAM_BOT_USERNAME_PLACEHOLDER,
+} from "@shared/telegramConfig";
+
+export { TELEGRAM_BOT_USERNAME_PLACEHOLDER };
 
 const NO_ACCESS_MSG =
   "လူကြီးမင်း၏ အသုံးပြုခွင့် ကုန်ဆုံးသွားပါပြီ။ ထပ်မံဝယ်ယူရန် ChatPilot သို့ ဆက်သွယ်ပါ။";
@@ -20,9 +28,10 @@ const LINK_SUCCESS_MSG =
   "အကောင့်ချိတ်ဆက်မှု အောင်မြင်ပါသည်။ စတင်မေးမြန်းနိုင်ပါပြီ။";
 const INVALID_TOKEN_MSG =
   "ချိတ်ဆက်မှုမအောင်မြင်ပါ။ Admin ထံမှ ရရှိသော activation link ကို ပြန်စမ်းကြည့်ပါ။";
-
-/** Replace with your bot username (no @). Used in admin activation links. */
-export const TELEGRAM_BOT_USERNAME_PLACEHOLDER = "YOUR_BOT_USERNAME";
+const SYSTEM_ERROR_MSG =
+  "စနစ်ချို့ယွင်းနေပါသည်။ ခဏနေမှ ထပ်မံကြိုးစားကြည့်ပါ။";
+const ALREADY_LINKED_MSG =
+  "အကောင့် ချိတ်ဆက်ပြီးသားဖြစ်ပါသည်။ စာသားပို့ပြီး မေးမြန်းနိုင်ပါပြီ။";
 
 type TelegramUpdate = {
   message?: {
@@ -58,6 +67,16 @@ function parseStartToken(text: string): string | null {
   const parts = trimmed.split(/\s+/);
   if (parts.length < 2) return null;
   return parts[1]!.replace(/^@/, "").trim() || null;
+}
+
+/** `/start` or `/start@BotName` with no activation payload. */
+function isBareStartCommand(text: string): boolean {
+  return /^\s*\/start(?:@[\w_]+)?\s*$/i.test(text.trim());
+}
+
+function extractChatId(update: TelegramUpdate): string | undefined {
+  const id = update?.message?.chat?.id;
+  return id != null ? String(id) : undefined;
 }
 
 async function sendTelegramMessage(
@@ -109,13 +128,7 @@ async function handleChatMessage(
   advisor: AdvisorSlug,
   botToken: string,
 ): Promise<void> {
-  let user;
-  try {
-    user = await db.getUserByTelegramChatId(chatId);
-  } catch (err) {
-    console.error("[Telegram] getUserByTelegramChatId failed:", err);
-    user = undefined;
-  }
+  const user = await safeGetUserByTelegramChatId(chatId);
   if (!user) {
     await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
     return;
@@ -153,16 +166,30 @@ async function handleChatMessage(
     reply = await invokeAdvisorLLM(advisor, llmMessages);
   } catch (err) {
     console.error("[Telegram] LLM error:", err);
-    await sendTelegramMessage(
-      botToken,
-      chatId,
-      "စနစ်တွင် ယာယီပြဿနာရှိပါသည်။ ခဏနေမှ ပြန်ကြိုးစားပါ။",
-    );
+    await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
     return;
   }
 
   await db.decrementTelegramMessageLimit(user.id, advisor);
   await sendTelegramMessage(botToken, chatId, reply);
+}
+
+async function safeGetUserByTelegramChatId(chatId: string) {
+  try {
+    return await db.getUserByTelegramChatId(chatId);
+  } catch (err) {
+    console.error("[Telegram] getUserByTelegramChatId failed:", err);
+    return undefined;
+  }
+}
+
+async function handleBareStart(chatId: string, botToken: string): Promise<void> {
+  const user = await safeGetUserByTelegramChatId(chatId);
+  if (!user) {
+    await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
+    return;
+  }
+  await sendTelegramMessage(botToken, chatId, ALREADY_LINKED_MSG);
 }
 
 async function processUpdate(
@@ -171,10 +198,18 @@ async function processUpdate(
   botToken: string,
 ): Promise<void> {
   const message = update?.message;
-  if (!message?.text) return;
+  if (!message?.text) {
+    console.log("[Telegram] Ignoring update without text message");
+    return;
+  }
 
   const chatId = String(message.chat.id);
   const text = message.text;
+
+  if (isBareStartCommand(text)) {
+    await handleBareStart(chatId, botToken);
+    return;
+  }
 
   const startToken = parseStartToken(text);
   if (startToken) {
@@ -182,21 +217,26 @@ async function processUpdate(
     return;
   }
 
-  if (text.startsWith("/")) return;
+  if (text.startsWith("/")) {
+    console.log("[Telegram] Ignoring unhandled command:", text.slice(0, 32));
+    return;
+  }
 
   await handleChatMessage(chatId, text, advisor, botToken);
 }
 
 export function registerTelegramRoutes(app: Express): void {
   app.post("/api/telegram/webhook", async (req: Request, res: Response) => {
-    // Always acknowledge Telegram immediately to prevent retries
-    res.status(200).json({ ok: true });
+    console.log("Received Telegram message:", req.body);
+
+    let botToken: string | undefined;
+    let chatId: string | undefined;
 
     try {
       await ensureTelegramSchema();
 
       const advisor = parseAdvisor(req);
-      const botToken = getTelegramBotToken(advisor);
+      botToken = getTelegramBotToken(advisor);
       if (!botToken) {
         console.error(
           `[Telegram] No bot token for ${advisor}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`,
@@ -205,19 +245,35 @@ export function registerTelegramRoutes(app: Express): void {
       }
 
       const update = (req.body ?? {}) as TelegramUpdate;
+      chatId = extractChatId(update);
       await processUpdate(update, advisor, botToken);
     } catch (err) {
       console.error("[Telegram] Webhook processing error:", err);
+      if (botToken && chatId) {
+        try {
+          await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
+        } catch (sendErr) {
+          console.error("[Telegram] Failed to send error reply:", sendErr);
+        }
+      }
+    } finally {
+      res.status(200).json({ ok: true });
     }
   });
 }
 
+export function getTelegramBizBotUsername(): string {
+  return resolveTelegramBizBotUsername(process.env);
+}
+
+export function getTelegramFounderBotUsername(): string | null {
+  return resolveTelegramFounderBotUsername(process.env);
+}
+
 export function buildTelegramActivationLink(token: string, botUsername?: string): string {
   const username =
-    botUsername?.trim() ||
-    process.env.TELEGRAM_BIZ_BOT_USERNAME?.trim() ||
-    TELEGRAM_BOT_USERNAME_PLACEHOLDER;
-  return `https://t.me/${username}?start=${token}`;
+    botUsername?.trim().replace(/^@/, "") || getTelegramBizBotUsername();
+  return buildTelegramStartLink(token, username);
 }
 
 export function resolveWebhookBaseUrl(req?: Request): string {
@@ -244,6 +300,21 @@ export function resolveWebhookBaseUrl(req?: Request): string {
   );
 }
 
+function assertPublicWebhookBaseUrl(baseUrl: string): void {
+  let host = "";
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    throw new Error(`Invalid webhook base URL: ${baseUrl}`);
+  }
+  // Vercel *preview* deployments use Deployment Protection → Telegram gets 401.
+  if (host.endsWith("-projects.vercel.app")) {
+    throw new Error(
+      `Webhook base URL must be your production domain (e.g. https://pilothub.vip), not a Vercel preview URL (${host}). Set PUBLIC_APP_URL=https://pilothub.vip in Vercel env, then run Setup Bot from the live admin panel.`,
+    );
+  }
+}
+
 export async function setupTelegramWebhook(
   advisor: AdvisorSlug,
   baseUrl: string,
@@ -256,6 +327,8 @@ export async function setupTelegramWebhook(
         : "TELEGRAM_FOUNDERPILOT_TOKEN is not set in environment",
     );
   }
+
+  assertPublicWebhookBaseUrl(baseUrl);
 
   const webhookUrl = `${baseUrl.replace(/\/$/, "")}/api/telegram/webhook?advisor=${advisor}`;
   const apiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
@@ -294,11 +367,9 @@ export async function generateTelegramActivationToken(
   const token = nanoid(32);
   const row = await db.createBotActivationToken(userId, token);
   const username =
-    botUsername?.trim() ||
-    process.env.TELEGRAM_BIZ_BOT_USERNAME?.trim() ||
-    TELEGRAM_BOT_USERNAME_PLACEHOLDER;
+    botUsername?.trim().replace(/^@/, "") || getTelegramBizBotUsername();
   const activationLink = buildTelegramActivationLink(token, username);
-  const founderBot = process.env.TELEGRAM_FOUNDER_BOT_USERNAME?.trim();
+  const founderBot = getTelegramFounderBotUsername();
   return {
     token: row.token,
     userId: row.userId,

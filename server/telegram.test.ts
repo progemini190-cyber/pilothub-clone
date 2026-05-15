@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { hasTelegramCredits, isTelegramPlanActive } from "./db";
+import {
+  buildTelegramStartLink,
+  resolveTelegramBizBotUsername,
+  TELEGRAM_BOT_USERNAME_PLACEHOLDER,
+} from "@shared/telegramConfig";
+import { buildTelegramActivationLink, getTelegramBizBotUsername } from "./telegram";
 
 describe("hasTelegramCredits", () => {
   it("denies free-tier users even with default website limits", () => {
@@ -70,5 +76,37 @@ describe("hasTelegramCredits", () => {
         "bizpilot",
       ),
     ).toBe(true);
+  });
+});
+
+describe("telegram bot username env", () => {
+  const prev = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...prev };
+  });
+
+  beforeEach(() => {
+    delete process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
+    delete process.env.VITE_TELEGRAM_BOT_USERNAME;
+    delete process.env.TELEGRAM_BIZPILOT_BOT_USERNAME;
+    delete process.env.TELEGRAM_BIZ_BOT_USERNAME;
+    delete process.env.TELEGRAM_BOT_USERNAME;
+  });
+
+  it("uses NEXT_PUBLIC_TELEGRAM_BOT_USERNAME for activation links", () => {
+    process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME = "@MyBizPilotBot";
+    expect(resolveTelegramBizBotUsername(process.env)).toBe("MyBizPilotBot");
+    expect(getTelegramBizBotUsername()).toBe("MyBizPilotBot");
+    expect(buildTelegramActivationLink("tok123")).toBe(
+      "https://t.me/MyBizPilotBot?start=tok123",
+    );
+    expect(buildTelegramStartLink("tok123", "MyBizPilotBot")).toBe(
+      buildTelegramActivationLink("tok123"),
+    );
+  });
+
+  it("falls back to placeholder when unset", () => {
+    expect(getTelegramBizBotUsername()).toBe(TELEGRAM_BOT_USERNAME_PLACEHOLDER);
   });
 });

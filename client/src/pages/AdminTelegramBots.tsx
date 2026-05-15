@@ -4,9 +4,11 @@ import { trpc } from "@/lib/trpc";
 import { DashboardShell } from "@/components/DashboardShell";
 import { Search, Bot, Copy, Check, Link2, Settings2, Webhook, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-
-/** Replace with your Telegram bot username (no @). */
-const YOUR_BOT_USERNAME = "YOUR_BOT_USERNAME";
+import {
+  buildActivationLink,
+  getTelegramBizBotUsername,
+  isTelegramBotUsernameConfigured,
+} from "@/lib/telegramConfig";
 
 type TelegramUser = {
   id: number;
@@ -45,10 +47,6 @@ function toDateInputValue(value: Date | string | null | undefined) {
   return d.toISOString().slice(0, 10);
 }
 
-function buildActivationLink(token: string) {
-  return `https://t.me/${YOUR_BOT_USERNAME}?start=${token}`;
-}
-
 export default function AdminTelegramBots() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
@@ -67,6 +65,17 @@ export default function AdminTelegramBots() {
   const [quickBizLimit, setQuickBizLimit] = useState("20");
   const [quickFounderLimit, setQuickFounderLimit] = useState("0");
   const [quickExpiry, setQuickExpiry] = useState(toDateInputValue(addMonths(new Date(), 1)));
+
+  const { data: telegramSettings } = trpc.admin.telegram.getSettings.useQuery(undefined, {
+    retry: 1,
+  });
+
+  const bizBotUsername =
+    telegramSettings?.bizBotUsernameConfigured
+      ? telegramSettings.bizBotUsername
+      : getTelegramBizBotUsername();
+
+  const botUsernameReady = isTelegramBotUsernameConfigured(bizBotUsername);
 
   const {
     data,
@@ -246,7 +255,6 @@ export default function AdminTelegramBots() {
       bizMessageLimit: biz,
       founderMessageLimit: founder,
       planExpiryDate: quickExpiry || undefined,
-      botUsername: YOUR_BOT_USERNAME,
     });
   };
 
@@ -290,11 +298,19 @@ export default function AdminTelegramBots() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <p className="text-sm flex-1" style={{ color: "oklch(55% 0.03 220)" }}>
-            Manage Telegram users, limits, and expiry. Bot username in links:{" "}
-            <code className="text-xs px-1.5 py-0.5 rounded" style={{ background: "oklch(22% 0.05 220)", color: "oklch(72% 0.18 162)" }}>
-              {YOUR_BOT_USERNAME}
+            Manage Telegram users, limits, and expiry. Activation links use bot{" "}
+            <code className="text-xs px-1.5 py-0.5 rounded" style={{ background: "oklch(22% 0.05 220)", color: botUsernameReady ? "oklch(72% 0.18 162)" : "oklch(75% 0.18 25)" }}>
+              @{bizBotUsername}
             </code>
-            . Set <code>TELEGRAM_BIZPILOT_TOKEN</code> and <code>PUBLIC_APP_URL</code> in .env for Setup Bot.
+            {botUsernameReady ? (
+              <> from <code className="text-xs">NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</code>.</>
+            ) : (
+              <>
+                {" "}
+                — set <code className="text-xs">NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</code> in .env / Vercel and redeploy.
+              </>
+            )}{" "}
+            Also set <code>TELEGRAM_BIZPILOT_TOKEN</code> and <code>PUBLIC_APP_URL</code> for Setup Bot.
           </p>
           <div className="flex flex-wrap gap-2 shrink-0">
             <button
@@ -483,7 +499,6 @@ export default function AdminTelegramBots() {
                               onClick={() =>
                                 createToken.mutate({
                                   userId: u.id,
-                                  botUsername: YOUR_BOT_USERNAME,
                                 })
                               }
                               disabled={createToken.isPending}
