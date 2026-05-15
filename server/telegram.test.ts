@@ -8,31 +8,22 @@ import {
 import { buildTelegramActivationLink, getTelegramBizBotUsername } from "./telegram";
 
 describe("hasTelegramCredits", () => {
-  it("denies free-tier users even with default website limits", () => {
+  it("allows when limit > 0 regardless of website planType", () => {
     expect(
       hasTelegramCredits(
-        { bizMessageLimit: 5, planTypeBiz: "free" },
-        "bizpilot",
-      ),
-    ).toBe(false);
-    expect(
-      hasTelegramCredits(
-        { founderMessageLimit: 5, planTypeFounder: "free" },
-        "founderpilot",
-      ),
-    ).toBe(false);
-  });
-
-  it("allows paid users with remaining limit", () => {
-    expect(
-      hasTelegramCredits(
-        { bizMessageLimit: 20, planTypeBiz: "starter" },
+        { bizMessageLimit: 20, planExpiryDate: null },
         "bizpilot",
       ),
     ).toBe(true);
     expect(
       hasTelegramCredits(
-        { founderMessageLimit: 999999, planTypeFounder: "pro" },
+        { bizMessageLimit: 5, planExpiryDate: null },
+        "bizpilot",
+      ),
+    ).toBe(true);
+    expect(
+      hasTelegramCredits(
+        { founderMessageLimit: 999999, planExpiryDate: null },
         "founderpilot",
       ),
     ).toBe(true);
@@ -40,20 +31,24 @@ describe("hasTelegramCredits", () => {
 
   it("denies when limit is zero", () => {
     expect(
+      hasTelegramCredits({ bizMessageLimit: 0, planExpiryDate: null }, "bizpilot"),
+    ).toBe(false);
+  });
+
+  it("coerces string limits from the database", () => {
+    expect(
       hasTelegramCredits(
-        { bizMessageLimit: 0, planTypeBiz: "pro" },
+        { bizMessageLimit: "15" as unknown as number, planExpiryDate: null },
         "bizpilot",
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("treats null plan expiry as active", () => {
     expect(
-      hasTelegramCredits(
-        { bizMessageLimit: 20, planTypeBiz: "starter", planExpiryDate: null },
-        "bizpilot",
-      ),
+      hasTelegramCredits({ bizMessageLimit: 20, planExpiryDate: null }, "bizpilot"),
     ).toBe(true);
+    expect(isTelegramPlanActive(null)).toBe(true);
   });
 
   it("denies when plan expiry date has passed", () => {
@@ -61,7 +56,7 @@ describe("hasTelegramCredits", () => {
     expect(isTelegramPlanActive(yesterday)).toBe(false);
     expect(
       hasTelegramCredits(
-        { bizMessageLimit: 20, planTypeBiz: "starter", planExpiryDate: yesterday },
+        { bizMessageLimit: 20, planExpiryDate: yesterday },
         "bizpilot",
       ),
     ).toBe(false);
@@ -72,7 +67,7 @@ describe("hasTelegramCredits", () => {
     expect(isTelegramPlanActive(nextMonth)).toBe(true);
     expect(
       hasTelegramCredits(
-        { bizMessageLimit: 20, planTypeBiz: "starter", planExpiryDate: nextMonth },
+        { bizMessageLimit: 20, planExpiryDate: nextMonth },
         "bizpilot",
       ),
     ).toBe(true);

@@ -863,34 +863,41 @@ export async function markActivationTokenUsed(tokenId: number) {
     .where(eq(botActivationTokens.id, tokenId));
 }
 
-/** True when plan expiry is unset, invalid, or still in the future. */
-export function isTelegramPlanActive(planExpiryDate: Date | null | undefined): boolean {
-  if (planExpiryDate == null) return true;
-  const ts = new Date(planExpiryDate).getTime();
-  if (Number.isNaN(ts)) return true;
-  return ts > Date.now();
+/** Coerce DB integer/text values to a non-negative message limit. */
+export function coerceTelegramMessageLimit(value: unknown): number {
+  if (value == null) return 0;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
 }
 
-/** Paid Telegram access: active expiry, limit > 0, not on free website tier. */
+/**
+ * Plan is active when expiry is null/unset, OR expiry is strictly in the future.
+ */
+export function isTelegramPlanActive(
+  planExpiryDate: Date | string | number | null | undefined,
+): boolean {
+  if (planExpiryDate == null) return true;
+  const expiry = new Date(planExpiryDate);
+  if (Number.isNaN(expiry.getTime())) return true;
+  return expiry.getTime() > Date.now();
+}
+
+/** Telegram access: advisor limit > 0 and plan not expired. */
 export function hasTelegramCredits(
   user: {
-    bizMessageLimit?: number | null;
-    founderMessageLimit?: number | null;
-    planTypeBiz?: string | null;
-    planTypeFounder?: string | null;
-    planExpiryDate?: Date | null;
+    bizMessageLimit?: number | string | null;
+    founderMessageLimit?: number | string | null;
+    planExpiryDate?: Date | string | number | null;
   },
   advisor: AdvisorSlug,
 ): boolean {
   if (!isTelegramPlanActive(user.planExpiryDate ?? null)) return false;
-  if (advisor === "bizpilot") {
-    const limit = user.bizMessageLimit ?? 0;
-    const planType = user.planTypeBiz ?? "free";
-    return limit > 0 && planType !== "free";
-  }
-  const limit = user.founderMessageLimit ?? 0;
-  const planType = user.planTypeFounder ?? "free";
-  return limit > 0 && planType !== "free";
+  const limit =
+    advisor === "bizpilot"
+      ? coerceTelegramMessageLimit(user.bizMessageLimit)
+      : coerceTelegramMessageLimit(user.founderMessageLimit);
+  return limit > 0;
 }
 
 export type TelegramAdminUserRow = {

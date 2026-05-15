@@ -83,7 +83,7 @@ async function sendTelegramMessage(
   botToken: string,
   chatId: string | number,
   text: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const response = await fetch(url, {
@@ -94,9 +94,12 @@ async function sendTelegramMessage(
     if (!response.ok) {
       const body = await response.text();
       console.error("[Telegram] sendMessage failed:", response.status, body);
+      return false;
     }
+    return true;
   } catch (err) {
     console.error("[Telegram] sendMessage error:", err);
+    return false;
   }
 }
 
@@ -134,7 +137,24 @@ async function handleChatMessage(
     return;
   }
 
+  console.log("Credit check:", {
+    userId: user.id,
+    advisor,
+    limit:
+      advisor === "bizpilot"
+        ? db.coerceTelegramMessageLimit(user.bizMessageLimit)
+        : db.coerceTelegramMessageLimit(user.founderMessageLimit),
+    bizMessageLimit: user.bizMessageLimit,
+    founderMessageLimit: user.founderMessageLimit,
+    expiry: user.planExpiryDate,
+    expiryActive: db.isTelegramPlanActive(user.planExpiryDate ?? null),
+  });
+
   if (!db.hasTelegramCredits(user, advisor)) {
+    console.log("[Telegram] Credit check failed — denying access", {
+      userId: user.id,
+      advisor,
+    });
     await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
     return;
   }
@@ -170,8 +190,20 @@ async function handleChatMessage(
     return;
   }
 
+  const sent = await sendTelegramMessage(botToken, chatId, reply);
+  if (!sent) {
+    console.error("[Telegram] Gemini reply was not delivered; limit not decremented", {
+      userId: user.id,
+      advisor,
+    });
+    return;
+  }
+
   await db.decrementTelegramMessageLimit(user.id, advisor);
-  await sendTelegramMessage(botToken, chatId, reply);
+  console.log("[Telegram] Message limit decremented after successful delivery", {
+    userId: user.id,
+    advisor,
+  });
 }
 
 async function safeGetUserByTelegramChatId(chatId: string) {
