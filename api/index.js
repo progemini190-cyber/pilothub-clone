@@ -41,6 +41,64 @@ var init_env = __esm({
   }
 });
 
+// server/_core/userStatus.ts
+var userStatus_exports = {};
+__export(userStatus_exports, {
+  isApprovedUserStatus: () => isApprovedUserStatus,
+  isPendingUserStatus: () => isPendingUserStatus,
+  isUserApproved: () => isUserApproved,
+  normalizeUserStatus: () => normalizeUserStatus,
+  pickCanonicalUser: () => pickCanonicalUser
+});
+function normalizeUserStatus(status) {
+  return (status ?? "").trim();
+}
+function isApprovedUserStatus(status) {
+  const s = normalizeUserStatus(status);
+  if (!s) return false;
+  if (APPROVED_USER_STATUSES.has(s)) return true;
+  return s.toLowerCase() === "approved" || s.toLowerCase() === "active";
+}
+function isPendingUserStatus(status) {
+  const s = normalizeUserStatus(status).toLowerCase();
+  return s === "pending" || s === "PENDING".toLowerCase();
+}
+function isUserApproved(user) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  return isApprovedUserStatus(user.status);
+}
+function pickCanonicalUser(candidates, googleSub) {
+  if (candidates.length === 0) return void 0;
+  const unique = [...new Map(candidates.map((u) => [u.id, u])).values()];
+  const approved = unique.filter((u) => isUserApproved(u));
+  const pool = approved.length > 0 ? approved : unique;
+  const score = (u) => {
+    let s = 0;
+    if (isUserApproved(u)) s += 100;
+    if (u.openId === googleSub) s += 50;
+    if (u.openId.startsWith("app_") || u.openId.startsWith("ext_")) s += 30;
+    if (u.role === "admin") s += 20;
+    if (u.loginMethod === "google") s += 5;
+    if (isPendingUserStatus(u.status) && u.loginMethod === "google") s -= 40;
+    return s;
+  };
+  return [...pool].sort((a, b) => score(b) - score(a) || a.id - b.id)[0];
+}
+var APPROVED_USER_STATUSES;
+var init_userStatus = __esm({
+  "server/_core/userStatus.ts"() {
+    "use strict";
+    APPROVED_USER_STATUSES = /* @__PURE__ */ new Set([
+      "active",
+      "approved",
+      "APPROVED",
+      "Active",
+      "Approved"
+    ]);
+  }
+});
+
 // server/storage.ts
 var storage_exports = {};
 __export(storage_exports, {
@@ -293,65 +351,122 @@ function shouldGrantAdminRole(input) {
 }
 
 // server/db.ts
+init_userStatus();
 var _db = null;
 var _dbLogged = false;
-function resolveDatabaseUrl() {
-  const turso = process.env.TURSO_DATABASE_URL?.trim();
-  if (turso) return turso;
-  return process.env.DATABASE_URL?.trim() || void 0;
+function resolveDatabaseConfig() {
+  const tursoUrl = process.env.TURSO_DATABASE_URL?.trim();
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL === "1" || ENV.isProduction;
+  if (tursoUrl?.startsWith("file:") && isProd) {
+    console.error("[Database] Production cannot use file: URLs \u2014 set TURSO_DATABASE_URL to libsql://\u2026turso.io");
+    return null;
+  }
+  if (isProd) {
+    if (!tursoUrl) {
+      return null;
+    }
+    return {
+      url: tursoUrl,
+      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || void 0,
+      source: "TURSO_DATABASE_URL"
+    };
+  }
+  if (tursoUrl) {
+    return {
+      url: tursoUrl,
+      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || void 0,
+      source: "TURSO_DATABASE_URL"
+    };
+  }
+  const devUrl = process.env.DATABASE_URL?.trim();
+  if (devUrl) {
+    return {
+      url: devUrl,
+      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || void 0,
+      source: "DATABASE_URL_DEV"
+    };
+  }
+  return null;
 }
 function maskDatabaseUrl(url) {
   try {
-    const parsed = new URL(url.replace(/^libsql:/, "https:"));
-    return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+    const normalized = url.replace(/^libsql:/, "https:");
+    const parsed = new URL(normalized);
+    const dbName = parsed.pathname.replace(/^\//, "") || "(default)";
+    return `${parsed.hostname}/${dbName}`;
   } catch {
-    return url.startsWith("file:") ? "file:***" : "unknown";
+    if (url.startsWith("file:")) return "file:***";
+    const at = url.indexOf("@");
+    if (at > 0) return url.slice(at + 1, at + 40);
+    return url.slice(0, 48);
+  }
+}
+function tokenFingerprint(token) {
+  if (!token) return "missing";
+  if (token.length < 12) return "set-short";
+  return `set:${token.slice(0, 4)}\u2026${token.slice(-4)}`;
+}
+async function logDatabaseHealth(database) {
+  try {
+    const [userRow] = await database.select({ count: sql`count(*)` }).from(users);
+    const [payRow] = await database.select({ count: sql`count(*)` }).from(payments);
+    const [keyRow] = await database.select({ count: sql`count(*)` }).from(apiKeys);
+    console.info("[Database] Health check", {
+      users: Number(userRow?.count ?? 0),
+      payments: Number(payRow?.count ?? 0),
+      apiKeys: Number(keyRow?.count ?? 0)
+    });
+  } catch (err) {
+    console.warn("[Database] Health check failed:", err);
   }
 }
 async function getDb() {
   if (_db) return _db;
-  const url = resolveDatabaseUrl();
-  if (!url) {
+  const config = resolveDatabaseConfig();
+  if (!config) {
     if (!_dbLogged) {
       console.error(
-        "[Database] TURSO_DATABASE_URL (or DATABASE_URL) is not set \u2014 all queries return empty"
+        "[Database] TURSO_DATABASE_URL is not set (required in production). DATABASE_URL fallback is disabled on Vercel."
       );
       _dbLogged = true;
     }
     return null;
   }
-  if (ENV.isProduction && url.startsWith("file:")) {
-    console.error(
-      "[Database] Refusing file: SQLite in production. Set TURSO_DATABASE_URL to your Turso database."
-    );
+  if (config.url.startsWith("file:") && (ENV.isProduction || process.env.VERCEL === "1")) {
+    console.error("[Database] Refusing file: SQLite on Vercel/production");
     return null;
   }
-  const needsToken = url.includes("turso.io");
-  const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
-  if (needsToken && !authToken && !url.startsWith("file:")) {
-    console.error(
-      "[Database] TURSO_AUTH_TOKEN is required for remote Turso/libsql URLs",
-      { target: maskDatabaseUrl(url) }
-    );
+  const isRemote = config.url.includes("turso.io") || config.url.startsWith("libsql://") || config.url.startsWith("https://");
+  if (isRemote && !config.authToken && !config.url.startsWith("file:")) {
+    console.error("[Database] TURSO_AUTH_TOKEN is required", {
+      target: maskDatabaseUrl(config.url),
+      source: config.source
+    });
     return null;
   }
   try {
     const client = createClient({
-      url,
-      authToken: authToken || void 0
+      url: config.url,
+      authToken: config.authToken
     });
     _db = drizzle(client);
     if (!_dbLogged) {
       console.info("[Database] Connected", {
-        target: maskDatabaseUrl(url),
-        source: process.env.TURSO_DATABASE_URL ? "TURSO_DATABASE_URL" : "DATABASE_URL",
-        hasAuthToken: Boolean(authToken)
+        target: maskDatabaseUrl(config.url),
+        source: config.source,
+        token: tokenFingerprint(config.authToken),
+        nodeEnv: process.env.NODE_ENV ?? "unknown",
+        vercel: process.env.VERCEL === "1"
       });
+      await logDatabaseHealth(_db);
       _dbLogged = true;
     }
     return _db;
   } catch (error) {
-    console.error("[Database] Failed to connect:", error, { target: maskDatabaseUrl(url) });
+    console.error("[Database] Failed to connect:", error, {
+      target: maskDatabaseUrl(config.url),
+      source: config.source
+    });
     return null;
   }
 }
@@ -428,12 +543,43 @@ async function getUserById(id) {
 function normalizeEmail(email) {
   return email.trim().toLowerCase();
 }
-async function getUserByEmail(email) {
+async function getUsersByEmail(email) {
   const db = await getDb();
-  if (!db) return void 0;
+  if (!db) return [];
   const normalized = normalizeEmail(email);
-  const result = await db.select().from(users).where(sql`lower(trim(${users.email})) = ${normalized}`).limit(1);
-  return result.length > 0 ? result[0] : void 0;
+  return db.select().from(users).where(sql`lower(trim(${users.email})) = ${normalized}`).orderBy(asc(users.id));
+}
+async function getUserByEmail(email) {
+  const matches = await getUsersByEmail(email);
+  if (matches.length === 0) return void 0;
+  return pickCanonicalUser(matches, "");
+}
+async function resolveUserForGoogleLogin(email, googleSub) {
+  const { pickCanonicalUser: pickCanonicalUser2, isPendingUserStatus: isPendingUserStatus2 } = await Promise.resolve().then(() => (init_userStatus(), userStatus_exports));
+  const byOpenId = await getUserByOpenId(googleSub);
+  const byEmail = email ? await getUsersByEmail(email) : [];
+  const candidates = [...byEmail, ...byOpenId ? [byOpenId] : []];
+  let canonical = pickCanonicalUser2(candidates, googleSub);
+  if (canonical && canonical.openId !== googleSub) {
+    if (byOpenId && byOpenId.id !== canonical.id && isPendingUserStatus2(byOpenId.status)) {
+      const database = await getDb();
+      if (database) {
+        await database.delete(users).where(eq(users.id, byOpenId.id));
+        console.info("[Database] Removed stale pending Google row", {
+          removedId: byOpenId.id,
+          keptId: canonical.id,
+          email
+        });
+      }
+    }
+    await linkUserToGoogleOpenId(canonical.id, googleSub, { loginMethod: "google" });
+    canonical = await getUserByOpenId(googleSub) ?? canonical;
+  }
+  return {
+    user: canonical ?? byOpenId,
+    byOpenId,
+    byEmail
+  };
 }
 async function linkUserToGoogleOpenId(userId, googleOpenId, fields) {
   const db = await getDb();
@@ -899,25 +1045,14 @@ init_env();
 
 // server/_core/googleLogin.ts
 init_env();
-function isUserApproved(user) {
-  if (!user) return false;
-  if (user.role === "admin") return true;
-  return user.status === "active";
-}
+init_userStatus();
 async function resolveGoogleLogin(userInfo) {
   const googleSub = userInfo.sub;
   const userEmail = userInfo.email ? normalizeEmail(userInfo.email) : null;
-  let userByOpenId = await getUserByOpenId(googleSub);
-  let userByEmail = userEmail ? await getUserByEmail(userEmail) : void 0;
-  if (userByEmail && userByEmail.openId !== googleSub) {
-    await linkUserToGoogleOpenId(userByEmail.id, googleSub, {
-      name: userInfo.name ?? userByEmail.name,
-      loginMethod: "google"
-    });
-    userByOpenId = await getUserByOpenId(googleSub);
-    userByEmail = userByOpenId;
-  }
-  const existingUser = userByOpenId ?? userByEmail;
+  const { user: existingUser, byOpenId, byEmail } = await resolveUserForGoogleLogin(
+    userEmail,
+    googleSub
+  );
   let approvedApplication;
   let latestApplication;
   if (userEmail) {
@@ -930,14 +1065,19 @@ async function resolveGoogleLogin(userInfo) {
   }
   const isOwner = Boolean(ENV.ownerGoogleSub && googleSub === ENV.ownerGoogleSub);
   const isAdmin = Boolean(userEmail && isAdminEmail(userEmail));
-  const isApproved = isOwner || isAdmin || isUserApproved(existingUser) || Boolean(approvedApplication);
+  const isApproved = isOwner || isAdmin || isUserApproved(existingUser) || Boolean(approvedApplication) || latestApplication?.status === "approved";
   const userStatus = existingUser?.status ?? (isApproved ? "active" : latestApplication?.status === "approved" ? "active" : "pending");
   const grantAdmin = shouldGrantAdminRole({
     email: userEmail,
     googleSub,
     ownerGoogleSub: ENV.ownerGoogleSub
   });
-  console.log("User Login Attempt:", userEmail, "Status:", userStatus, "Role:", grantAdmin ? "admin" : existingUser?.role ?? "user");
+  console.log("User Login Attempt:", userEmail, "Status:", userStatus, "Role:", grantAdmin ? "admin" : existingUser?.role ?? "user", {
+    matchedByOpenId: Boolean(byOpenId),
+    matchedByEmail: byEmail.length,
+    existingUserId: existingUser?.id,
+    isApproved
+  });
   const upsert = {
     openId: googleSub,
     name: userInfo.name || existingUser?.name || null,
@@ -950,13 +1090,15 @@ async function resolveGoogleLogin(userInfo) {
     upsert.status = "active";
   } else if (!existingUser) {
     upsert.status = isApproved ? "active" : "pending";
-  } else if (isApproved && existingUser.status !== "active") {
+  } else if (isApproved && !isApprovedUserStatus(existingUser.status)) {
     upsert.status = "active";
   }
   let redirectPath = "/app";
   if (!isApproved) {
     const hasExistingAccount = Boolean(existingUser || latestApplication);
-    if (hasExistingAccount && (existingUser?.status === "pending" || latestApplication?.status === "pending")) {
+    const pendingUser = existingUser && isPendingUserStatus(existingUser.status);
+    const pendingApp = latestApplication?.status === "pending";
+    if (hasExistingAccount && (pendingUser || pendingApp)) {
       redirectPath = `/login-required?reason=pending&email=${encodeURIComponent(userEmail ?? "")}`;
     } else {
       redirectPath = `/login-required?reason=not_approved&email=${encodeURIComponent(userEmail ?? "")}`;
@@ -985,6 +1127,7 @@ var ForbiddenError = (msg) => new HttpError(403, msg);
 // server/_core/sdk.ts
 import { parse as parseCookieHeader } from "cookie";
 import { SignJWT, jwtVerify } from "jose";
+init_userStatus();
 init_env();
 var isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
 var SessionService = class {
@@ -1064,11 +1207,13 @@ var SessionService = class {
       await updateUserRole(user.id, "admin");
       user = { ...user, role: "admin" };
     }
+    const upsertStatus = isUserApproved(user) && user.status?.toLowerCase() !== "active" ? "active" : void 0;
     await upsertUser({
       openId: user.openId,
       email: user.email,
       lastSignedIn: signedInAt,
-      role: user.role === "admin" ? "admin" : void 0
+      role: user.role === "admin" ? "admin" : void 0,
+      ...upsertStatus ? { status: upsertStatus } : {}
     });
     return user;
   }
@@ -1366,9 +1511,18 @@ function registerOAuthRoutes(app2) {
         res.redirect(302, "/login-required?reason=unverified");
         return;
       }
+      const config = resolveDatabaseConfig();
+      if (!config) {
+        console.error("[Google OAuth] Database not configured \u2014 set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN on Vercel");
+      } else {
+        console.info("[Google OAuth] Database target", {
+          target: maskDatabaseUrl(config.url),
+          source: config.source
+        });
+      }
       const dbReady = await getDb();
       if (!dbReady) {
-        console.error("[Google OAuth] Database not available \u2014 check TURSO_DATABASE_URL / TURSO_AUTH_TOKEN");
+        console.error("[Google OAuth] Database connection failed \u2014 check Turso env vars");
       }
       const login = await resolveGoogleLogin(userInfo);
       try {
@@ -1541,6 +1695,7 @@ async function notifyOwner(payload) {
 }
 
 // server/_core/trpc.ts
+init_userStatus();
 import { initTRPC, TRPCError as TRPCError2 } from "@trpc/server";
 import superjson from "superjson";
 var t = initTRPC.context().create({
@@ -1566,7 +1721,7 @@ var requireApproved = t.middleware(async (opts) => {
   if (!ctx.user) {
     throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
-  if (ctx.user.status === "pending") {
+  if (!isUserApproved(ctx.user) && isPendingUserStatus(ctx.user.status)) {
     throw new TRPCError2({ code: "FORBIDDEN", message: "Your account is pending admin approval." });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });

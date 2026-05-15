@@ -2,6 +2,7 @@ import type { InsertUser, User } from "../../drizzle/schema";
 import * as db from "../db";
 import { isAdminEmail, shouldGrantAdminRole } from "./adminAccess";
 import { ENV } from "./env";
+import { isApprovedUserStatus, isPendingUserStatus, isUserApproved } from "./userStatus";
 
 export type GoogleUserInfo = {
   sub: string;
@@ -19,33 +20,18 @@ export type GoogleLoginResolution = {
   upsert: InsertUser;
 };
 
-function isUserApproved(user: User | undefined): boolean {
-  if (!user) return false;
-  if (user.role === "admin") return true;
-  return user.status === "active";
-}
-
 /**
  * Resolves redirect + upsert for Google OAuth callback.
- * Primary source of truth: `users.status` (active = approved). Applications table is a fallback.
+ * Looks up users by Google `sub` and email (handles duplicate legacy rows).
  */
 export async function resolveGoogleLogin(userInfo: GoogleUserInfo): Promise<GoogleLoginResolution> {
   const googleSub = userInfo.sub;
   const userEmail = userInfo.email ? db.normalizeEmail(userInfo.email) : null;
 
-  let userByOpenId = await db.getUserByOpenId(googleSub);
-  let userByEmail = userEmail ? await db.getUserByEmail(userEmail) : undefined;
-
-  if (userByEmail && userByEmail.openId !== googleSub) {
-    await db.linkUserToGoogleOpenId(userByEmail.id, googleSub, {
-      name: userInfo.name ?? userByEmail.name,
-      loginMethod: "google",
-    });
-    userByOpenId = await db.getUserByOpenId(googleSub);
-    userByEmail = userByOpenId;
-  }
-
-  const existingUser = userByOpenId ?? userByEmail;
+  const { user: existingUser, byOpenId, byEmail } = await db.resolveUserForGoogleLogin(
+    userEmail,
+    googleSub,
+  );
 
   let approvedApplication: Awaited<ReturnType<typeof db.getApprovedApplicationByEmail>> | undefined;
   let latestApplication: Awaited<ReturnType<typeof db.getApplicationByEmail>> | undefined;
@@ -64,10 +50,12 @@ export async function resolveGoogleLogin(userInfo: GoogleUserInfo): Promise<Goog
     isOwner ||
     isAdmin ||
     isUserApproved(existingUser) ||
-    Boolean(approvedApplication);
+    Boolean(approvedApplication) ||
+    latestApplication?.status === "approved";
 
-  const userStatus = existingUser?.status
-    ?? (isApproved ? "active" : latestApplication?.status === "approved" ? "active" : "pending");
+  const userStatus =
+    existingUser?.status ??
+    (isApproved ? "active" : latestApplication?.status === "approved" ? "active" : "pending");
 
   const grantAdmin = shouldGrantAdminRole({
     email: userEmail,
@@ -75,7 +63,12 @@ export async function resolveGoogleLogin(userInfo: GoogleUserInfo): Promise<Goog
     ownerGoogleSub: ENV.ownerGoogleSub,
   });
 
-  console.log("User Login Attempt:", userEmail, "Status:", userStatus, "Role:", grantAdmin ? "admin" : existingUser?.role ?? "user");
+  console.log("User Login Attempt:", userEmail, "Status:", userStatus, "Role:", grantAdmin ? "admin" : existingUser?.role ?? "user", {
+    matchedByOpenId: Boolean(byOpenId),
+    matchedByEmail: byEmail.length,
+    existingUserId: existingUser?.id,
+    isApproved,
+  });
 
   const upsert: InsertUser = {
     openId: googleSub,
@@ -90,14 +83,16 @@ export async function resolveGoogleLogin(userInfo: GoogleUserInfo): Promise<Goog
     upsert.status = "active";
   } else if (!existingUser) {
     upsert.status = isApproved ? "active" : "pending";
-  } else if (isApproved && existingUser.status !== "active") {
+  } else if (isApproved && !isApprovedUserStatus(existingUser.status)) {
     upsert.status = "active";
   }
 
   let redirectPath = "/app";
   if (!isApproved) {
     const hasExistingAccount = Boolean(existingUser || latestApplication);
-    if (hasExistingAccount && (existingUser?.status === "pending" || latestApplication?.status === "pending")) {
+    const pendingUser = existingUser && isPendingUserStatus(existingUser.status);
+    const pendingApp = latestApplication?.status === "pending";
+    if (hasExistingAccount && (pendingUser || pendingApp)) {
       redirectPath = `/login-required?reason=pending&email=${encodeURIComponent(userEmail ?? "")}`;
     } else {
       redirectPath = `/login-required?reason=not_approved&email=${encodeURIComponent(userEmail ?? "")}`;

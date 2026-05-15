@@ -378,9 +378,18 @@ export function registerOAuthRoutes(app: Express) {
         return;
       }
 
+      const config = db.resolveDatabaseConfig();
+      if (!config) {
+        console.error("[Google OAuth] Database not configured — set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN on Vercel");
+      } else {
+        console.info("[Google OAuth] Database target", {
+          target: db.maskDatabaseUrl(config.url),
+          source: config.source,
+        });
+      }
       const dbReady = await db.getDb();
       if (!dbReady) {
-        console.error("[Google OAuth] Database not available — check TURSO_DATABASE_URL / TURSO_AUTH_TOKEN");
+        console.error("[Google OAuth] Database connection failed — check Turso env vars");
       }
 
       const login = await resolveGoogleLogin(userInfo);

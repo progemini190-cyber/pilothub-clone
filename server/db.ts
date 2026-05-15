@@ -17,73 +17,150 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { shouldGrantAdminRole } from "./_core/adminAccess";
+import { pickCanonicalUser } from "./_core/userStatus";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _dbLogged = false;
 
-function resolveDatabaseUrl(): string | undefined {
-  const turso = process.env.TURSO_DATABASE_URL?.trim();
-  if (turso) return turso;
-  return process.env.DATABASE_URL?.trim() || undefined;
+export type DatabaseConfig = {
+  url: string;
+  authToken: string | undefined;
+  source: "TURSO_DATABASE_URL" | "DATABASE_URL_DEV";
+};
+
+/** Production uses Turso only. Dev may use DATABASE_URL (never file: in production). */
+export function resolveDatabaseConfig(): DatabaseConfig | null {
+  const tursoUrl = process.env.TURSO_DATABASE_URL?.trim();
+  const isProd =
+    process.env.NODE_ENV === "production" ||
+    process.env.VERCEL === "1" ||
+    ENV.isProduction;
+
+  if (tursoUrl?.startsWith("file:") && isProd) {
+    console.error("[Database] Production cannot use file: URLs — set TURSO_DATABASE_URL to libsql://…turso.io");
+    return null;
+  }
+
+  if (isProd) {
+    if (!tursoUrl) {
+      return null;
+    }
+    return {
+      url: tursoUrl,
+      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || undefined,
+      source: "TURSO_DATABASE_URL",
+    };
+  }
+
+  if (tursoUrl) {
+    return {
+      url: tursoUrl,
+      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || undefined,
+      source: "TURSO_DATABASE_URL",
+    };
+  }
+
+  const devUrl = process.env.DATABASE_URL?.trim();
+  if (devUrl) {
+    return {
+      url: devUrl,
+      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || undefined,
+      source: "DATABASE_URL_DEV",
+    };
+  }
+
+  return null;
 }
 
-function maskDatabaseUrl(url: string): string {
+export function maskDatabaseUrl(url: string): string {
   try {
-    const parsed = new URL(url.replace(/^libsql:/, "https:"));
-    return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+    const normalized = url.replace(/^libsql:/, "https:");
+    const parsed = new URL(normalized);
+    const dbName = parsed.pathname.replace(/^\//, "") || "(default)";
+    return `${parsed.hostname}/${dbName}`;
   } catch {
-    return url.startsWith("file:") ? "file:***" : "unknown";
+    if (url.startsWith("file:")) return "file:***";
+    const at = url.indexOf("@");
+    if (at > 0) return url.slice(at + 1, at + 40);
+    return url.slice(0, 48);
+  }
+}
+
+function tokenFingerprint(token: string | undefined): string {
+  if (!token) return "missing";
+  if (token.length < 12) return "set-short";
+  return `set:${token.slice(0, 4)}…${token.slice(-4)}`;
+}
+
+async function logDatabaseHealth(database: ReturnType<typeof drizzle>): Promise<void> {
+  try {
+    const [userRow] = await database.select({ count: sql<number>`count(*)` }).from(users);
+    const [payRow] = await database.select({ count: sql<number>`count(*)` }).from(payments);
+    const [keyRow] = await database.select({ count: sql<number>`count(*)` }).from(apiKeys);
+    console.info("[Database] Health check", {
+      users: Number(userRow?.count ?? 0),
+      payments: Number(payRow?.count ?? 0),
+      apiKeys: Number(keyRow?.count ?? 0),
+    });
+  } catch (err) {
+    console.warn("[Database] Health check failed:", err);
   }
 }
 
 export async function getDb() {
   if (_db) return _db;
 
-  const url = resolveDatabaseUrl();
-  if (!url) {
+  const config = resolveDatabaseConfig();
+  if (!config) {
     if (!_dbLogged) {
       console.error(
-        "[Database] TURSO_DATABASE_URL (or DATABASE_URL) is not set — all queries return empty",
+        "[Database] TURSO_DATABASE_URL is not set (required in production). DATABASE_URL fallback is disabled on Vercel.",
       );
       _dbLogged = true;
     }
     return null;
   }
 
-  if (ENV.isProduction && url.startsWith("file:")) {
-    console.error(
-      "[Database] Refusing file: SQLite in production. Set TURSO_DATABASE_URL to your Turso database.",
-    );
+  if (config.url.startsWith("file:") && (ENV.isProduction || process.env.VERCEL === "1")) {
+    console.error("[Database] Refusing file: SQLite on Vercel/production");
     return null;
   }
 
-  const needsToken = url.includes("turso.io");
-  const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
-  if (needsToken && !authToken && !url.startsWith("file:")) {
-    console.error(
-      "[Database] TURSO_AUTH_TOKEN is required for remote Turso/libsql URLs",
-      { target: maskDatabaseUrl(url) },
-    );
+  const isRemote =
+    config.url.includes("turso.io") ||
+    config.url.startsWith("libsql://") ||
+    config.url.startsWith("https://");
+  if (isRemote && !config.authToken && !config.url.startsWith("file:")) {
+    console.error("[Database] TURSO_AUTH_TOKEN is required", {
+      target: maskDatabaseUrl(config.url),
+      source: config.source,
+    });
     return null;
   }
 
   try {
     const client = createClient({
-      url,
-      authToken: authToken || undefined,
+      url: config.url,
+      authToken: config.authToken,
     });
     _db = drizzle(client);
     if (!_dbLogged) {
       console.info("[Database] Connected", {
-        target: maskDatabaseUrl(url),
-        source: process.env.TURSO_DATABASE_URL ? "TURSO_DATABASE_URL" : "DATABASE_URL",
-        hasAuthToken: Boolean(authToken),
+        target: maskDatabaseUrl(config.url),
+        source: config.source,
+        token: tokenFingerprint(config.authToken),
+        nodeEnv: process.env.NODE_ENV ?? "unknown",
+        vercel: process.env.VERCEL === "1",
       });
+      await logDatabaseHealth(_db);
       _dbLogged = true;
     }
     return _db;
   } catch (error) {
-    console.error("[Database] Failed to connect:", error, { target: maskDatabaseUrl(url) });
+    console.error("[Database] Failed to connect:", error, {
+      target: maskDatabaseUrl(config.url),
+      source: config.source,
+    });
     return null;
   }
 }
@@ -158,16 +235,57 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-export async function getUserByEmail(email: string) {
+export async function getUsersByEmail(email: string) {
   const db = await getDb();
-  if (!db) return undefined;
+  if (!db) return [];
   const normalized = normalizeEmail(email);
-  const result = await db
+  return db
     .select()
     .from(users)
     .where(sql`lower(trim(${users.email})) = ${normalized}`)
-    .limit(1);
-  return result.length > 0 ? result[0] : undefined;
+    .orderBy(asc(users.id));
+}
+
+export async function getUserByEmail(email: string) {
+  const matches = await getUsersByEmail(email);
+  if (matches.length === 0) return undefined;
+  return pickCanonicalUser(matches, "");
+}
+
+/** Resolve existing account for Google OAuth (email + openId, handles duplicate rows). */
+export async function resolveUserForGoogleLogin(
+  email: string | null,
+  googleSub: string,
+) {
+  const { pickCanonicalUser, isPendingUserStatus } = await import("./_core/userStatus");
+
+  const byOpenId = await getUserByOpenId(googleSub);
+  const byEmail = email ? await getUsersByEmail(email) : [];
+
+  const candidates = [...byEmail, ...(byOpenId ? [byOpenId] : [])];
+  let canonical = pickCanonicalUser(candidates, googleSub);
+
+  if (canonical && canonical.openId !== googleSub) {
+    if (byOpenId && byOpenId.id !== canonical.id && isPendingUserStatus(byOpenId.status)) {
+      const database = await getDb();
+      if (database) {
+        await database.delete(users).where(eq(users.id, byOpenId.id));
+        console.info("[Database] Removed stale pending Google row", {
+          removedId: byOpenId.id,
+          keptId: canonical.id,
+          email,
+        });
+      }
+    }
+    await linkUserToGoogleOpenId(canonical.id, googleSub, { loginMethod: "google" });
+    canonical = (await getUserByOpenId(googleSub)) ?? canonical;
+  }
+
+  return {
+    user: canonical ?? byOpenId,
+    byOpenId,
+    byEmail,
+  };
 }
 
 /** Re-attach an admin-provisioned account (`app_*` openId) to the user's Google `sub`. */

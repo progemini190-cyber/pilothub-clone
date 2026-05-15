@@ -6,6 +6,7 @@ import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 import { isAdminEmail } from "./adminAccess";
+import { isUserApproved } from "./userStatus";
 import { ENV } from "./env";
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -123,11 +124,17 @@ class SessionService {
       user = { ...user, role: "admin" as const };
     }
 
+    const upsertStatus =
+      isUserApproved(user) && user.status?.toLowerCase() !== "active"
+        ? "active"
+        : undefined;
+
     await db.upsertUser({
       openId: user.openId,
       email: user.email,
       lastSignedIn: signedInAt,
       role: user.role === "admin" ? "admin" : undefined,
+      ...(upsertStatus ? { status: upsertStatus as "active" } : {}),
     });
 
     return user;

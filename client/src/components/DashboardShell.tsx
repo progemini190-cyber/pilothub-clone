@@ -25,18 +25,27 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
 
   const isAdmin = isAdminShell || user?.role === "admin";
 
+  const userStatus = (user as { status?: string | null } | null)?.status ?? "";
+  const statusLower = userStatus.toLowerCase();
+  const isApprovedUser =
+    isAdmin ||
+    statusLower === "active" ||
+    statusLower === "approved" ||
+    userStatus === "APPROVED";
+  const isPendingUser = statusLower === "pending";
+
   // Approval gate: send unapproved users to login-required as early as possible (before paint when cached).
   useLayoutEffect(() => {
     if (isAdminShell) return;
-    if (user && (user as { status?: string }).status === "pending") {
+    if (user && isPendingUser && !isApprovedUser) {
       window.location.replace(
         `/login-required?reason=pending&email=${encodeURIComponent(String((user as { email?: string | null }).email ?? ""))}`,
       );
     }
-  }, [user, isAdminShell]);
+  }, [user, isAdminShell, isPendingUser, isApprovedUser]);
 
   // Render-time guard: show nothing while checking or if pending
-  if (!isAdminShell && (loading || (user && (user as any).status === "pending"))) {
+  if (!isAdminShell && (loading || (user && isPendingUser && !isApprovedUser))) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "oklch(12% 0.03 220)" }}>
         <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: "oklch(72% 0.18 162 / 0.4)", borderTopColor: "transparent" }} />
