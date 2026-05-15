@@ -221,6 +221,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
         await logHealth(_db, "mysql");
         _initLogged = true;
       }
+      const { ensureTelegramSchema } = await import("./ensureTelegramSchema");
+      await ensureTelegramSchema().catch((err) =>
+        console.warn("[Database] Telegram schema migration skipped:", err),
+      );
       return _db;
     }
   }
@@ -249,6 +253,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
             await logHealth(_db, "turso");
             _initLogged = true;
           }
+          const { ensureTelegramSchema } = await import("./ensureTelegramSchema");
+          await ensureTelegramSchema().catch((err) =>
+            console.warn("[Database] Telegram schema migration skipped:", err),
+          );
           return _db;
         }
       }
@@ -269,6 +277,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
         await logHealth(_db, "mysql");
         _initLogged = true;
       }
+      const { ensureTelegramSchema } = await import("./ensureTelegramSchema");
+      await ensureTelegramSchema().catch((err) =>
+        console.warn("[Database] Telegram schema migration skipped:", err),
+      );
       return _db;
     }
   }
@@ -286,6 +298,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
           await logHealth(_db, "turso");
           _initLogged = true;
         }
+        const { ensureTelegramSchema } = await import("./ensureTelegramSchema");
+        await ensureTelegramSchema().catch((err) =>
+          console.warn("[Database] Telegram schema migration skipped:", err),
+        );
         return _db;
       }
     } catch {

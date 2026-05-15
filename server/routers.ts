@@ -733,8 +733,14 @@ export const appRouter = router({
     telegram: router({
       list: publicProcedure.query(async ({ ctx }) => {
         await requireAdmin(ctx);
-        const users = await db.listTelegramBotUsers();
-        return { users };
+        try {
+          const users = await db.listTelegramBotUsers();
+          return { users };
+        } catch (err) {
+          console.error("[Admin] telegram.list failed, falling back to listAllUsers:", err);
+          const all = await db.listAllUsers();
+          return { users: all.map((u) => db.mapUserToTelegramRow(u)) };
+        }
       }),
       updatePlan: publicProcedure
         .input(
@@ -744,24 +750,33 @@ export const appRouter = router({
             founderMessageLimit: z.number().int().min(0).optional(),
             addBizMessages: z.number().int().min(0).optional(),
             addFounderMessages: z.number().int().min(0).optional(),
-            planExpiryDate: z.string().datetime().nullable().optional(),
+            planExpiryDate: z.string().nullable().optional(),
           }),
         )
         .mutation(async ({ ctx, input }) => {
           await requireAdmin(ctx);
           try {
+            let parsedExpiry: Date | null | undefined = undefined;
+            if (input.planExpiryDate !== undefined) {
+              if (input.planExpiryDate === null || input.planExpiryDate === "") {
+                parsedExpiry = null;
+              } else {
+                const d = new Date(input.planExpiryDate.includes("T")
+                  ? input.planExpiryDate
+                  : `${input.planExpiryDate}T23:59:59`);
+                if (Number.isNaN(d.getTime())) {
+                  throw new Error("Invalid expiry date");
+                }
+                parsedExpiry = d;
+              }
+            }
             await db.updateTelegramUserPlan({
               userId: input.userId,
               bizMessageLimit: input.bizMessageLimit,
               founderMessageLimit: input.founderMessageLimit,
               addBizMessages: input.addBizMessages,
               addFounderMessages: input.addFounderMessages,
-              planExpiryDate:
-                input.planExpiryDate === undefined
-                  ? undefined
-                  : input.planExpiryDate
-                    ? new Date(input.planExpiryDate)
-                    : null,
+              planExpiryDate: parsedExpiry,
             });
             return { success: true };
           } catch (err) {
@@ -769,6 +784,26 @@ export const appRouter = router({
             throw new TRPCError({ code: "BAD_REQUEST", message });
           }
         }),
+      createActivationToken: publicProcedure
+        .input(
+          z.object({
+            userId: z.number(),
+            botUsername: z.string().min(1).optional(),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          await requireAdmin(ctx);
+          try {
+            return await generateTelegramActivationToken(
+              input.userId,
+              input.botUsername,
+            );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to generate token";
+            throw new TRPCError({ code: "BAD_REQUEST", message });
+          }
+        }),
+      /** @deprecated Use createActivationToken */
       generateLink: publicProcedure
         .input(
           z.object({

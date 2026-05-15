@@ -829,15 +829,29 @@ export async function getActivationToken(token: string) {
 }
 
 export async function createBotActivationToken(userId: number, token: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
   const user = await getUserById(userId);
   if (!user) throw new Error("User not found");
-  const [row] = await db
-    .insert(botActivationTokens)
-    .values({ token, userId, isUsed: "false" })
-    .returning();
-  return row;
+
+  try {
+    const inserted = await database
+      .insert(botActivationTokens)
+      .values({ token, userId, isUsed: "false" })
+      .returning();
+    if (inserted[0]) return inserted[0];
+  } catch (err) {
+    console.warn("[Database] bot_activation_tokens insert.returning failed, retrying:", err);
+  }
+
+  await database.insert(botActivationTokens).values({ token, userId, isUsed: "false" });
+  const found = await database
+    .select()
+    .from(botActivationTokens)
+    .where(eq(botActivationTokens.token, token))
+    .limit(1);
+  if (!found[0]) throw new Error("Failed to create activation token");
+  return found[0];
 }
 
 export async function markActivationTokenUsed(tokenId: number) {
@@ -849,10 +863,12 @@ export async function markActivationTokenUsed(tokenId: number) {
     .where(eq(botActivationTokens.id, tokenId));
 }
 
-/** True when plan expiry is unset or still in the future. */
+/** True when plan expiry is unset, invalid, or still in the future. */
 export function isTelegramPlanActive(planExpiryDate: Date | null | undefined): boolean {
-  if (!planExpiryDate) return true;
-  return new Date(planExpiryDate).getTime() > Date.now();
+  if (planExpiryDate == null) return true;
+  const ts = new Date(planExpiryDate).getTime();
+  if (Number.isNaN(ts)) return true;
+  return ts > Date.now();
 }
 
 /** Paid Telegram access: active expiry, limit > 0, not on free website tier. */
@@ -878,8 +894,10 @@ export function hasTelegramCredits(
 }
 
 export async function listTelegramBotUsers() {
-  const db = await assertDatabase();
-  return db
+  const { ensureTelegramSchema } = await import("./db/ensureTelegramSchema");
+  await ensureTelegramSchema();
+  const database = await assertDatabase();
+  return database
     .select({
       id: users.id,
       email: users.email,
@@ -895,6 +913,31 @@ export async function listTelegramBotUsers() {
     .orderBy(desc(users.createdAt));
 }
 
+/** Fallback mapper when selective telegram columns are unavailable. */
+export function mapUserToTelegramRow(user: {
+  id: number;
+  email?: string | null;
+  name?: string | null;
+  telegramChatId?: string | null;
+  bizMessageLimit?: number | null;
+  founderMessageLimit?: number | null;
+  planTypeBiz?: string | null;
+  planTypeFounder?: string | null;
+  planExpiryDate?: Date | null;
+}) {
+  return {
+    id: user.id,
+    email: user.email ?? null,
+    name: user.name ?? null,
+    telegramChatId: user.telegramChatId ?? null,
+    bizMessageLimit: user.bizMessageLimit ?? 5,
+    founderMessageLimit: user.founderMessageLimit ?? 5,
+    planTypeBiz: user.planTypeBiz ?? "free",
+    planTypeFounder: user.planTypeFounder ?? "free",
+    planExpiryDate: user.planExpiryDate ?? null,
+  };
+}
+
 export async function updateTelegramUserPlan(input: {
   userId: number;
   bizMessageLimit?: number;
@@ -903,6 +946,8 @@ export async function updateTelegramUserPlan(input: {
   addFounderMessages?: number;
   planExpiryDate?: Date | null;
 }) {
+  const { ensureTelegramSchema } = await import("./db/ensureTelegramSchema");
+  await ensureTelegramSchema();
   const db = await assertDatabase();
   const user = await getUserById(input.userId);
   if (!user) throw new Error("User not found");

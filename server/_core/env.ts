@@ -27,6 +27,12 @@ export const ENV = {
   adminEmail: process.env.ADMIN_EMAIL ?? "",
 
   /** Telegram bot tokens (BizPilot / FounderPilot paid channels). */
-  telegramBizBotToken: process.env.TELEGRAM_BIZ_BOT_TOKEN ?? "",
-  telegramFounderBotToken: process.env.TELEGRAM_FOUNDER_BOT_TOKEN ?? "",
+  telegramBizBotToken:
+    process.env.TELEGRAM_BIZPILOT_TOKEN ??
+    process.env.TELEGRAM_BIZ_BOT_TOKEN ??
+    "",
+  telegramFounderBotToken:
+    process.env.TELEGRAM_FOUNDERPILOT_TOKEN ??
+    process.env.TELEGRAM_FOUNDER_BOT_TOKEN ??
+    "",
 };

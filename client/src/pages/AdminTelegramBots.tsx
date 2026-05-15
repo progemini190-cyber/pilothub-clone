@@ -5,8 +5,8 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { Search, Bot, Copy, Check, Link2, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
-/** Change this to your Telegram bot username (without @). */
-const TELEGRAM_BOT_USERNAME = "Your_Bot_Username";
+/** Replace with your Telegram bot username (no @). */
+const YOUR_BOT_USERNAME = "YOUR_BOT_USERNAME";
 
 type TelegramUser = {
   id: number;
@@ -45,6 +45,10 @@ function toDateInputValue(value: Date | string | null | undefined) {
   return d.toISOString().slice(0, 10);
 }
 
+function buildActivationLink(token: string) {
+  return `https://t.me/${YOUR_BOT_USERNAME}?start=${token}`;
+}
+
 export default function AdminTelegramBots() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
@@ -54,13 +58,18 @@ export default function AdminTelegramBots() {
   const [addBiz, setAddBiz] = useState(false);
   const [addFounder, setAddFounder] = useState(false);
   const [expiryDate, setExpiryDate] = useState("");
-  const [linkModal, setLinkModal] = useState<{ user: TelegramUser; link: string } | null>(null);
+  const [linkModal, setLinkModal] = useState<{ user: TelegramUser; link: string; token: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const { data, isLoading, refetch } = trpc.admin.telegram.list.useQuery(undefined, {
-    retry: false,
-    onError: () => setLocation("/admin/login"),
-  } as Parameters<typeof trpc.admin.telegram.list.useQuery>[1]);
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = trpc.admin.telegram.list.useQuery(undefined, {
+    retry: 1,
+  });
 
   const updatePlan = trpc.admin.telegram.updatePlan.useMutation({
     onSuccess: () => {
@@ -68,20 +77,18 @@ export default function AdminTelegramBots() {
       setManageUser(null);
       toast.success("Telegram plan updated");
     },
-    onError: (err: { message?: string }) => toast.error(err.message || "Update failed"),
+    onError: (err) => toast.error(err.message || "Update failed"),
   });
 
-  const generateLink = trpc.admin.telegram.generateLink.useMutation({
+  const createToken = trpc.admin.telegram.createActivationToken.useMutation({
     onSuccess: (result, variables) => {
       const user = users.find((u) => u.id === variables.userId);
       if (!user) return;
-      const link =
-        result.activationLink ||
-        `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${result.token}`;
-      setLinkModal({ user, link });
-      toast.success("Activation link generated");
+      const link = result.activationLink || buildActivationLink(result.token);
+      setLinkModal({ user, link, token: result.token });
+      toast.success("Activation token created");
     },
-    onError: (err: { message?: string }) => toast.error(err.message || "Failed to generate link"),
+    onError: (err) => toast.error(err.message || "Failed to create token"),
   });
 
   const users = (data?.users ?? []) as TelegramUser[];
@@ -139,9 +146,7 @@ export default function AdminTelegramBots() {
 
     const payload: Parameters<typeof updatePlan.mutate>[0] = {
       userId: manageUser.id,
-      planExpiryDate: expiryDate
-        ? new Date(`${expiryDate}T23:59:59`).toISOString()
-        : null,
+      planExpiryDate: expiryDate || null,
     };
 
     if (addBiz) payload.addBizMessages = biz;
@@ -161,15 +166,51 @@ export default function AdminTelegramBots() {
     });
   };
 
+  if (isError) {
+    const message = error?.message ?? "Unknown error";
+    const isAuth = message.toLowerCase().includes("admin") || message.toLowerCase().includes("unauthorized");
+    return (
+      <DashboardShell title="Telegram Bots" activeTab="telegram-bots" isAdminShell>
+        <div className="p-8 rounded-2xl text-center space-y-4"
+          style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(25% 0.04 220)" }}>
+          <p className="text-white font-semibold">Could not load Telegram users</p>
+          <p className="text-sm" style={{ color: "oklch(55% 0.03 220)" }}>{message}</p>
+          <div className="flex gap-3 justify-center">
+            {isAuth ? (
+              <button
+                type="button"
+                onClick={() => setLocation("/admin/login")}
+                className="px-4 py-2 rounded-xl text-sm font-semibold"
+                style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}
+              >
+                Admin Login
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="px-4 py-2 rounded-xl text-sm font-semibold"
+                style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        </div>
+      </DashboardShell>
+    );
+  }
+
   return (
     <DashboardShell title="Telegram Bots" activeTab="telegram-bots" isAdminShell>
       <div className="space-y-6">
         <div>
           <p className="text-sm" style={{ color: "oklch(55% 0.03 220)" }}>
-            Manage Telegram-linked users, message limits, and plan expiry. Bot username placeholder:{" "}
+            Manage Telegram users, limits, and expiry. Bot username in links:{" "}
             <code className="text-xs px-1.5 py-0.5 rounded" style={{ background: "oklch(22% 0.05 220)", color: "oklch(72% 0.18 162)" }}>
-              {TELEGRAM_BOT_USERNAME}
+              {YOUR_BOT_USERNAME}
             </code>
+            {" "}(edit constant at top of <code>AdminTelegramBots.tsx</code>)
           </p>
         </div>
 
@@ -207,7 +248,7 @@ export default function AdminTelegramBots() {
         <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid oklch(25% 0.04 220)" }}>
           {isLoading ? (
             <div className="p-12 text-center" style={{ color: "oklch(55% 0.03 220)" }}>
-              Loading...
+              Loading users...
             </div>
           ) : filtered.length === 0 ? (
             <div className="p-12 text-center" style={{ color: "oklch(55% 0.03 220)" }}>
@@ -312,27 +353,25 @@ export default function AdminTelegramBots() {
                               <Settings2 className="w-3 h-3" />
                               Manage Plan
                             </button>
-                            {!linked && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  generateLink.mutate({
-                                    userId: u.id,
-                                    botUsername: TELEGRAM_BOT_USERNAME,
-                                  })
-                                }
-                                disabled={generateLink.isPending}
-                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
-                                style={{
-                                  background: "oklch(72% 0.18 162 / 0.12)",
-                                  color: "oklch(72% 0.18 162)",
-                                  border: "1px solid oklch(72% 0.18 162 / 0.25)",
-                                }}
-                              >
-                                <Link2 className="w-3 h-3" />
-                                Generate Link
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                createToken.mutate({
+                                  userId: u.id,
+                                  botUsername: YOUR_BOT_USERNAME,
+                                })
+                              }
+                              disabled={createToken.isPending}
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
+                              style={{
+                                background: "oklch(72% 0.18 162 / 0.12)",
+                                color: "oklch(72% 0.18 162)",
+                                border: "1px solid oklch(72% 0.18 162 / 0.25)",
+                              }}
+                            >
+                              <Link2 className="w-3 h-3" />
+                              Create Activation Token
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -478,7 +517,7 @@ export default function AdminTelegramBots() {
                 Activation Link
               </h2>
               <p className="text-xs mt-1" style={{ color: "oklch(55% 0.03 220)" }}>
-                Share with {linkModal.user.email || `user #${linkModal.user.id}`}
+                {linkModal.user.email || `User #${linkModal.user.id}`}
               </p>
             </div>
 
@@ -490,8 +529,7 @@ export default function AdminTelegramBots() {
             </div>
 
             <p className="text-xs" style={{ color: "oklch(55% 0.03 220)" }}>
-              Format: <code>t.me/{TELEGRAM_BOT_USERNAME}?start=&lt;token&gt;</code> — edit{" "}
-              <code>TELEGRAM_BOT_USERNAME</code> at the top of this page.
+              Token: <code>{linkModal.token}</code>
             </p>
 
             <div className="flex gap-3">
