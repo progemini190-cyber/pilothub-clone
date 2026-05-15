@@ -185,23 +185,31 @@ async function handleChatMessage(
     return;
   }
 
+  const isBiz = String(advisor).includes("biz");
+  const currentLimit = db.coerceTelegramMessageLimit(
+    isBiz ? user.bizMessageLimit : user.founderMessageLimit,
+  );
+  const isExpired = user.planExpiryDate
+    ? new Date(user.planExpiryDate).getTime() < Date.now()
+    : false;
+
   console.log("Credit check:", {
     userId: user.id,
     advisor,
-    limit:
-      advisor === "bizpilot"
-        ? db.coerceTelegramMessageLimit(user.bizMessageLimit)
-        : db.coerceTelegramMessageLimit(user.founderMessageLimit),
+    isBiz,
+    currentLimit,
     bizMessageLimit: user.bizMessageLimit,
     founderMessageLimit: user.founderMessageLimit,
     expiry: user.planExpiryDate,
-    expiryActive: db.isTelegramPlanActive(user.planExpiryDate ?? null),
+    isExpired,
   });
 
-  if (!db.hasTelegramCredits(user, advisor)) {
+  if (currentLimit <= 0 || isExpired) {
     console.log("[Telegram] Credit check failed — denying access", {
       userId: user.id,
       advisor,
+      currentLimit,
+      isExpired,
     });
     await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
     return;
@@ -229,7 +237,8 @@ async function handleChatMessage(
     { role: "user", content: userText },
   ];
 
-  await sendTypingChatAction(botToken, chatId);
+  /** Fire-and-forget so we don't delay Gemini; Telegram shows typing while request is in flight. */
+  void sendTypingChatAction(botToken, chatId).catch(() => {});
 
   let reply: string;
   try {
