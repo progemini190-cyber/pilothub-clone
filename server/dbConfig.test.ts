@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resolveDatabaseConfig, maskDatabaseUrl } from "./db";
+import { resolveTursoConfig, resolveMysqlUrl, maskDatabaseUrl } from "./db/connection";
 
-describe("resolveDatabaseConfig", () => {
+describe("database connection config", () => {
   const env = process.env;
 
   beforeEach(() => {
@@ -23,16 +23,14 @@ describe("resolveDatabaseConfig", () => {
     process.env.DATABASE_URL = "file:./empty.db";
     process.env.TURSO_AUTH_TOKEN = "secret-token";
 
-    const config = resolveDatabaseConfig();
+    const config = resolveTursoConfig();
     expect(config?.url).toBe("libsql://prod-db.turso.io");
-    expect(config?.source).toBe("TURSO_DATABASE_URL");
+    expect(resolveMysqlUrl()).toBeUndefined();
   });
 
-  it("rejects file URLs in production", () => {
-    process.env.NODE_ENV = "production";
-    process.env.TURSO_DATABASE_URL = "file:./local.db";
-
-    expect(resolveDatabaseConfig()).toBeNull();
+  it("resolves MYSQL_URL for legacy TiDB", () => {
+    process.env.MYSQL_URL = "mysql://u:p@tidb.example.com:4000/mydb";
+    expect(resolveMysqlUrl()).toContain("tidb.example.com");
   });
 
   it("masks turso host without exposing token", () => {

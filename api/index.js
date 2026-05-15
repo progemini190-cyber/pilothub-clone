@@ -194,9 +194,36 @@ var UNAUTHED_ERR_MSG = "Please login (10001)";
 var NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
 
 // server/db.ts
+init_env();
+import { eq, and, desc, asc, sql as sql2 } from "drizzle-orm";
+
+// server/_core/adminAccess.ts
+var DEFAULT_ADMIN_EMAILS = ["progemini190@gmail.com"];
+function getAdminEmails() {
+  const fromEnv = (process.env.ADMIN_EMAIL ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return [.../* @__PURE__ */ new Set([...DEFAULT_ADMIN_EMAILS, ...fromEnv])];
+}
+function isAdminEmail(email) {
+  if (!email) return false;
+  return getAdminEmails().includes(normalizeEmail(email));
+}
+function shouldGrantAdminRole(input) {
+  if (input.email && isAdminEmail(input.email)) return true;
+  if (input.ownerGoogleSub && input.googleSub && input.googleSub === input.ownerGoogleSub) {
+    return true;
+  }
+  return false;
+}
+
+// server/db.ts
+init_userStatus();
+
+// server/db/connection.ts
 import { createClient } from "@libsql/client";
-import { eq, and, desc, asc, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/libsql";
+import { sql } from "drizzle-orm";
+import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
+import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 
 // drizzle/schema.ts
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
@@ -329,75 +356,242 @@ var announcements = sqliteTable("announcements", {
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date())
 });
 
-// server/db.ts
+// drizzle/schema.mysql.ts
+var schema_mysql_exports = {};
+__export(schema_mysql_exports, {
+  aiModels: () => aiModels2,
+  announcements: () => announcements2,
+  apiKeys: () => apiKeys2,
+  applications: () => applications2,
+  conversations: () => conversations2,
+  externalApiTokens: () => externalApiTokens2,
+  messages: () => messages2,
+  payments: () => payments2,
+  systemPrompts: () => systemPrompts2,
+  systemSettings: () => systemSettings2,
+  users: () => users2
+});
+import {
+  mysqlTable,
+  varchar,
+  text as text2,
+  int,
+  timestamp,
+  mysqlEnum
+} from "drizzle-orm/mysql-core";
+var users2 = mysqlTable("users", {
+  id: int("id").primaryKey().autoincrement(),
+  openId: varchar("openId", { length: 255 }).notNull().unique(),
+  name: text2("name"),
+  email: varchar("email", { length: 320 }),
+  businessName: text2("businessName"),
+  businessType: varchar("businessType", { length: 128 }),
+  useCase: text2("useCase"),
+  phone: varchar("phone", { length: 20 }),
+  loginMethod: varchar("loginMethod", { length: 64 }),
+  role: mysqlEnum("role", ["user", "admin"]).notNull().default("user"),
+  plan: varchar("plan", { length: 64 }).default("free"),
+  status: varchar("status", { length: 64 }).default("active"),
+  subscriptionStart: timestamp("subscriptionStart"),
+  subscriptionEnd: timestamp("subscriptionEnd"),
+  notes: text2("notes"),
+  freeBizCount: int("freeBizCount").default(5).notNull(),
+  freeFounderCount: int("freeFounderCount").default(5).notNull(),
+  planTypeBiz: mysqlEnum("planTypeBiz", ["free", "starter", "pro"]).notNull().default("free"),
+  planTypeFounder: mysqlEnum("planTypeFounder", ["free", "starter", "pro"]).notNull().default("free"),
+  bizMessageLimit: int("bizMessageLimit").default(5).notNull(),
+  founderMessageLimit: int("founderMessageLimit").default(5).notNull(),
+  bizMessagesUsed: int("bizMessagesUsed").default(0).notNull(),
+  founderMessagesUsed: int("founderMessagesUsed").default(0).notNull(),
+  hasUsedBizStarter: mysqlEnum("hasUsedBizStarter", ["true", "false"]).notNull().default("false"),
+  hasUsedFounderStarter: mysqlEnum("hasUsedFounderStarter", ["true", "false"]).notNull().default("false"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
+  lastSignedIn: timestamp("lastSignedIn").notNull().defaultNow()
+});
+var payments2 = mysqlTable("payments", {
+  id: int("id").primaryKey().autoincrement(),
+  userId: int("userId"),
+  userName: text2("userName"),
+  userEmail: varchar("userEmail", { length: 320 }),
+  plan: varchar("plan", { length: 64 }).notNull(),
+  amount: int("amount").notNull(),
+  currency: varchar("currency", { length: 10 }).default("MMK").notNull(),
+  status: mysqlEnum("status", ["pending", "confirmed", "rejected"]).default("pending").notNull(),
+  paymentMethod: varchar("paymentMethod", { length: 64 }),
+  transactionRef: varchar("transactionRef", { length: 255 }),
+  screenshotUrl: text2("screenshotUrl"),
+  notes: text2("notes"),
+  source: varchar("source", { length: 32 }).default("website"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+});
+var apiKeys2 = mysqlTable("apiKeys", {
+  id: int("id").primaryKey().autoincrement(),
+  provider: varchar("provider", { length: 64 }).notNull(),
+  keyValue: text2("keyValue").notNull(),
+  isActive: mysqlEnum("isActive", ["true", "false"]).default("false"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+});
+var systemPrompts2 = mysqlTable("systemPrompts", {
+  id: int("id").primaryKey().autoincrement(),
+  name: text2("name").notNull(),
+  modelSlug: varchar("modelSlug", { length: 64 }).notNull(),
+  content: text2("content").notNull(),
+  version: int("version").default(1).notNull(),
+  isActive: mysqlEnum("isActive", ["true", "false"]).default("false"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+});
+var applications2 = mysqlTable("applications", {
+  id: int("id").primaryKey().autoincrement(),
+  fullName: text2("fullName").notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  phone: varchar("phone", { length: 20 }),
+  businessName: text2("businessName"),
+  businessType: varchar("businessType", { length: 128 }),
+  useCase: text2("useCase"),
+  plan: varchar("plan", { length: 64 }).default("free"),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  source: varchar("source", { length: 32 }).default("website"),
+  userId: int("userId"),
+  notes: text2("notes"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+});
+var aiModels2 = mysqlTable("aiModels", {
+  id: int("id").primaryKey().autoincrement(),
+  targetRole: varchar("targetRole", { length: 64 }).notNull().unique(),
+  modelString: text2("modelString").notNull(),
+  isActive: mysqlEnum("isActive", ["true", "false"]).default("true"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+});
+var systemSettings2 = mysqlTable("systemSettings", {
+  id: int("id").primaryKey().autoincrement(),
+  key: varchar("key", { length: 128 }).notNull().unique(),
+  value: text2("value"),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+});
+var conversations2 = mysqlTable("conversations", {
+  id: int("id").primaryKey().autoincrement(),
+  userId: int("userId").notNull(),
+  modelSlug: varchar("modelSlug", { length: 64 }).notNull(),
+  title: text2("title"),
+  summary: text2("summary"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+});
+var messages2 = mysqlTable("messages", {
+  id: int("id").primaryKey().autoincrement(),
+  conversationId: int("conversationId").notNull(),
+  role: varchar("role", { length: 64 }).notNull(),
+  content: text2("content").notNull(),
+  tokenCount: int("tokenCount"),
+  createdAt: timestamp("createdAt").notNull().defaultNow()
+});
+var externalApiTokens2 = mysqlTable("externalApiTokens", {
+  id: int("id").primaryKey().autoincrement(),
+  name: varchar("name", { length: 128 }).notNull(),
+  token: varchar("token", { length: 256 }).notNull().unique(),
+  isActive: mysqlEnum("isActive", ["true", "false"]).default("true"),
+  createdAt: timestamp("createdAt").notNull().defaultNow()
+});
+var announcements2 = mysqlTable("announcements", {
+  id: int("id").primaryKey().autoincrement(),
+  title: varchar("title", { length: 256 }).notNull(),
+  content: text2("content").notNull(),
+  type: mysqlEnum("type", ["info", "success", "warning", "urgent"]).default("info").notNull(),
+  isActive: mysqlEnum("isActive", ["true", "false"]).default("true").notNull(),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow()
+});
+
+// server/db/connection.ts
 init_env();
-
-// server/_core/adminAccess.ts
-var DEFAULT_ADMIN_EMAILS = ["progemini190@gmail.com"];
-function getAdminEmails() {
-  const fromEnv = (process.env.ADMIN_EMAIL ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return [.../* @__PURE__ */ new Set([...DEFAULT_ADMIN_EMAILS, ...fromEnv])];
-}
-function isAdminEmail(email) {
-  if (!email) return false;
-  return getAdminEmails().includes(normalizeEmail(email));
-}
-function shouldGrantAdminRole(input) {
-  if (input.email && isAdminEmail(input.email)) return true;
-  if (input.ownerGoogleSub && input.googleSub && input.googleSub === input.ownerGoogleSub) {
-    return true;
-  }
-  return false;
-}
-
-// server/db.ts
-init_userStatus();
 var _db = null;
-var _dbLogged = false;
-function resolveDatabaseConfig() {
+var _provider = null;
+var _mysqlPool = null;
+var _initLogged = false;
+var users3 = users;
+var payments3 = payments;
+var apiKeys3 = apiKeys;
+var systemPrompts3 = systemPrompts;
+var applications3 = applications;
+var aiModels3 = aiModels;
+var systemSettings3 = systemSettings;
+var conversations3 = conversations;
+var messages3 = messages;
+var externalApiTokens3 = externalApiTokens;
+var announcements3 = announcements;
+function applySchema(provider) {
+  if (provider === "mysql") {
+    users3 = users2;
+    payments3 = payments2;
+    apiKeys3 = apiKeys2;
+    systemPrompts3 = systemPrompts2;
+    applications3 = applications2;
+    aiModels3 = aiModels2;
+    systemSettings3 = systemSettings2;
+    conversations3 = conversations2;
+    messages3 = messages2;
+    externalApiTokens3 = externalApiTokens2;
+    announcements3 = announcements2;
+  } else {
+    users3 = users;
+    payments3 = payments;
+    apiKeys3 = apiKeys;
+    systemPrompts3 = systemPrompts;
+    applications3 = applications;
+    aiModels3 = aiModels;
+    systemSettings3 = systemSettings;
+    conversations3 = conversations;
+    messages3 = messages;
+    externalApiTokens3 = externalApiTokens;
+    announcements3 = announcements;
+  }
+}
+function resolveMysqlUrl() {
+  const direct = [
+    process.env.MYSQL_URL,
+    process.env.LEGACY_MYSQL_URL,
+    process.env.TIDB_DATABASE_URL
+  ].map((v) => v?.trim()).find((v) => v && (v.startsWith("mysql://") || v.startsWith("mysql2://")));
+  if (direct) return direct;
+  const host = process.env.TIDB_HOST ?? process.env.MYSQL_HOST;
+  const user = process.env.TIDB_USER ?? process.env.MYSQL_USER;
+  const password = process.env.TIDB_PASSWORD ?? process.env.MYSQL_PASSWORD;
+  const database = process.env.TIDB_DATABASE ?? process.env.MYSQL_DATABASE;
+  const port = process.env.TIDB_PORT ?? process.env.MYSQL_PORT ?? "4000";
+  if (host && user && password && database) {
+    const encUser = encodeURIComponent(user);
+    const encPass = encodeURIComponent(password);
+    return `mysql://${encUser}:${encPass}@${host}:${port}/${database}?ssl={"rejectUnauthorized":true}`;
+  }
+  return void 0;
+}
+function resolveTursoConfig() {
   const tursoUrl = process.env.TURSO_DATABASE_URL?.trim();
-  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL === "1" || ENV.isProduction;
-  if (tursoUrl?.startsWith("file:") && isProd) {
-    console.error("[Database] Production cannot use file: URLs \u2014 set TURSO_DATABASE_URL to libsql://\u2026turso.io");
-    return null;
-  }
-  if (isProd) {
-    if (!tursoUrl) {
-      return null;
-    }
-    return {
-      url: tursoUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || void 0,
-      source: "TURSO_DATABASE_URL"
-    };
-  }
-  if (tursoUrl) {
-    return {
-      url: tursoUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || void 0,
-      source: "TURSO_DATABASE_URL"
-    };
-  }
-  const devUrl = process.env.DATABASE_URL?.trim();
-  if (devUrl) {
-    return {
-      url: devUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || void 0,
-      source: "DATABASE_URL_DEV"
-    };
-  }
-  return null;
+  if (!tursoUrl) return null;
+  return {
+    url: tursoUrl,
+    authToken: process.env.TURSO_AUTH_TOKEN?.trim() || void 0
+  };
 }
 function maskDatabaseUrl(url) {
   try {
+    if (url.startsWith("mysql://") || url.startsWith("mysql2://")) {
+      const parsed2 = new URL(url);
+      const dbName2 = parsed2.pathname.replace(/^\//, "") || "(default)";
+      return `mysql://${parsed2.hostname}:${parsed2.port || "3306"}/${dbName2}`;
+    }
     const normalized = url.replace(/^libsql:/, "https:");
     const parsed = new URL(normalized);
     const dbName = parsed.pathname.replace(/^\//, "") || "(default)";
     return `${parsed.hostname}/${dbName}`;
   } catch {
     if (url.startsWith("file:")) return "file:***";
-    const at = url.indexOf("@");
-    if (at > 0) return url.slice(at + 1, at + 40);
     return url.slice(0, 48);
   }
 }
@@ -406,75 +600,168 @@ function tokenFingerprint(token) {
   if (token.length < 12) return "set-short";
   return `set:${token.slice(0, 4)}\u2026${token.slice(-4)}`;
 }
-async function logDatabaseHealth(database) {
+async function countUsers(database) {
   try {
-    const [userRow] = await database.select({ count: sql`count(*)` }).from(users);
-    const [payRow] = await database.select({ count: sql`count(*)` }).from(payments);
-    const [keyRow] = await database.select({ count: sql`count(*)` }).from(apiKeys);
+    const [row] = await database.select({ count: sql`count(*)` }).from(users3);
+    return Number(row?.count ?? 0);
+  } catch {
+    return -1;
+  }
+}
+async function logHealth(database, provider) {
+  try {
+    const [userRow] = await database.select({ count: sql`count(*)` }).from(users3);
+    const [payRow] = await database.select({ count: sql`count(*)` }).from(payments3);
+    const [keyRow] = await database.select({ count: sql`count(*)` }).from(apiKeys3);
+    const userCount = Number(userRow?.count ?? 0);
     console.info("[Database] Health check", {
-      users: Number(userRow?.count ?? 0),
+      provider,
+      users: userCount,
       payments: Number(payRow?.count ?? 0),
       apiKeys: Number(keyRow?.count ?? 0)
     });
+    return userCount;
   } catch (err) {
     console.warn("[Database] Health check failed:", err);
+    return -1;
   }
 }
-async function getDb() {
-  if (_db) return _db;
-  const config = resolveDatabaseConfig();
-  if (!config) {
-    if (!_dbLogged) {
-      console.error(
-        "[Database] TURSO_DATABASE_URL is not set (required in production). DATABASE_URL fallback is disabled on Vercel."
-      );
-      _dbLogged = true;
-    }
-    return null;
-  }
-  if (config.url.startsWith("file:") && (ENV.isProduction || process.env.VERCEL === "1")) {
+async function connectTurso(config) {
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL === "1" || ENV.isProduction;
+  if (config.url.startsWith("file:") && isProd) {
     console.error("[Database] Refusing file: SQLite on Vercel/production");
     return null;
   }
-  const isRemote = config.url.includes("turso.io") || config.url.startsWith("libsql://") || config.url.startsWith("https://");
+  const isRemote = config.url.includes("turso.io") || config.url.startsWith("libsql://");
   if (isRemote && !config.authToken && !config.url.startsWith("file:")) {
     console.error("[Database] TURSO_AUTH_TOKEN is required", {
-      target: maskDatabaseUrl(config.url),
-      source: config.source
+      target: maskDatabaseUrl(config.url)
     });
     return null;
   }
+  const client = createClient({
+    url: config.url,
+    authToken: config.authToken
+  });
+  applySchema("turso");
+  return drizzleLibsql(client);
+}
+async function connectMysql(url) {
   try {
-    const client = createClient({
-      url: config.url,
-      authToken: config.authToken
+    _mysqlPool = mysql.createPool({
+      uri: url,
+      connectionLimit: 5,
+      waitForConnections: true
     });
-    _db = drizzle(client);
-    if (!_dbLogged) {
-      console.info("[Database] Connected", {
-        target: maskDatabaseUrl(config.url),
-        source: config.source,
-        token: tokenFingerprint(config.authToken),
-        nodeEnv: process.env.NODE_ENV ?? "unknown",
-        vercel: process.env.VERCEL === "1"
-      });
-      await logDatabaseHealth(_db);
-      _dbLogged = true;
-    }
-    return _db;
-  } catch (error) {
-    console.error("[Database] Failed to connect:", error, {
-      target: maskDatabaseUrl(config.url),
-      source: config.source
-    });
+    applySchema("mysql");
+    return drizzleMysql(_mysqlPool, { schema: schema_mysql_exports, mode: "default" });
+  } catch (err) {
+    console.error("[Database] MySQL connect failed:", err);
     return null;
   }
 }
+async function initializeDatabase() {
+  if (_db) return _db;
+  const forceMysql = process.env.DATABASE_PROVIDER?.toLowerCase() === "mysql";
+  const mysqlUrl = resolveMysqlUrl();
+  const tursoConfig = resolveTursoConfig();
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL === "1" || ENV.isProduction;
+  if (forceMysql && mysqlUrl) {
+    const mysqlDb = await connectMysql(mysqlUrl);
+    if (mysqlDb) {
+      _db = mysqlDb;
+      _provider = "mysql";
+      if (!_initLogged) {
+        console.info("[Database] Connected (forced MySQL legacy)", {
+          target: maskDatabaseUrl(mysqlUrl)
+        });
+        await logHealth(_db, "mysql");
+        _initLogged = true;
+      }
+      return _db;
+    }
+  }
+  if (tursoConfig && !(isProd && tursoConfig.url.startsWith("file:"))) {
+    try {
+      const tursoDb = await connectTurso(tursoConfig);
+      if (tursoDb) {
+        const userCount = await countUsers(tursoDb);
+        const shouldFallback = userCount === 0 && Boolean(mysqlUrl);
+        if (shouldFallback) {
+          console.warn(
+            "[Database] Turso has 0 users \u2014 falling back to legacy MySQL (Manus/TiDB).",
+            { tursoTarget: maskDatabaseUrl(tursoConfig.url) }
+          );
+        } else {
+          _db = tursoDb;
+          _provider = "turso";
+          if (!_initLogged) {
+            console.info("[Database] Connected", {
+              provider: "turso",
+              target: maskDatabaseUrl(tursoConfig.url),
+              token: tokenFingerprint(tursoConfig.authToken)
+            });
+            await logHealth(_db, "turso");
+            _initLogged = true;
+          }
+          return _db;
+        }
+      }
+    } catch (err) {
+      console.error("[Database] Turso connect failed:", err);
+    }
+  }
+  if (mysqlUrl) {
+    const mysqlDb = await connectMysql(mysqlUrl);
+    if (mysqlDb) {
+      _db = mysqlDb;
+      _provider = "mysql";
+      if (!_initLogged) {
+        console.info("[Database] Connected (legacy MySQL)", {
+          target: maskDatabaseUrl(mysqlUrl)
+        });
+        await logHealth(_db, "mysql");
+        _initLogged = true;
+      }
+      return _db;
+    }
+  }
+  if (tursoConfig) {
+    try {
+      const tursoDb = await connectTurso(tursoConfig);
+      if (tursoDb) {
+        _db = tursoDb;
+        _provider = "turso";
+        if (!_initLogged) {
+          console.info("[Database] Connected (Turso, may be empty)", {
+            target: maskDatabaseUrl(tursoConfig.url)
+          });
+          await logHealth(_db, "turso");
+          _initLogged = true;
+        }
+        return _db;
+      }
+    } catch {
+    }
+  }
+  if (!_initLogged) {
+    console.error(
+      "[Database] No database available. Set TURSO_DATABASE_URL + TURSO_AUTH_TOKEN, or MYSQL_URL for legacy TiDB."
+    );
+    _initLogged = true;
+  }
+  return null;
+}
+async function getDb() {
+  return initializeDatabase();
+}
+
+// server/db.ts
 async function assertDatabase() {
   const database = await getDb();
   if (!database) {
     throw new Error(
-      "Database unavailable. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in your deployment environment."
+      "Database unavailable. Set TURSO_DATABASE_URL + TURSO_AUTH_TOKEN, or MYSQL_URL for legacy TiDB data."
     );
   }
   return database;
@@ -519,8 +806,8 @@ async function upsertUser(user) {
     }
     if (!values.lastSignedIn) values.lastSignedIn = /* @__PURE__ */ new Date();
     if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = /* @__PURE__ */ new Date();
-    await db.insert(users).values(values).onConflictDoUpdate({
-      target: users.openId,
+    await db.insert(users3).values(values).onConflictDoUpdate({
+      target: users3.openId,
       set: updateSet
     });
   } catch (error) {
@@ -531,13 +818,13 @@ async function upsertUser(user) {
 async function getUserByOpenId(openId) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  const result = await db.select().from(users3).where(eq(users3.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
 async function getUserById(id) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  const result = await db.select().from(users3).where(eq(users3.id, id)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
 function normalizeEmail(email) {
@@ -547,7 +834,7 @@ async function getUsersByEmail(email) {
   const db = await getDb();
   if (!db) return [];
   const normalized = normalizeEmail(email);
-  return db.select().from(users).where(sql`lower(trim(${users.email})) = ${normalized}`).orderBy(asc(users.id));
+  return db.select().from(users3).where(sql2`lower(trim(${users3.email})) = ${normalized}`).orderBy(asc(users3.id));
 }
 async function getUserByEmail(email) {
   const matches = await getUsersByEmail(email);
@@ -564,7 +851,7 @@ async function resolveUserForGoogleLogin(email, googleSub) {
     if (byOpenId && byOpenId.id !== canonical.id && isPendingUserStatus2(byOpenId.status)) {
       const database = await getDb();
       if (database) {
-        await database.delete(users).where(eq(users.id, byOpenId.id));
+        await database.delete(users3).where(eq(users3.id, byOpenId.id));
         console.info("[Database] Removed stale pending Google row", {
           removedId: byOpenId.id,
           keptId: canonical.id,
@@ -587,7 +874,7 @@ async function linkUserToGoogleOpenId(userId, googleOpenId, fields) {
   const conflicting = await getUserByOpenId(googleOpenId);
   if (conflicting && conflicting.id !== userId) {
     if (conflicting.status === "pending" && conflicting.loginMethod === "google") {
-      await db.delete(users).where(eq(users.id, conflicting.id));
+      await db.delete(users3).where(eq(users3.id, conflicting.id));
     } else {
       throw new Error("This Google account is already linked to another user");
     }
@@ -598,21 +885,21 @@ async function linkUserToGoogleOpenId(userId, googleOpenId, fields) {
     lastSignedIn: /* @__PURE__ */ new Date()
   };
   if (fields.name !== void 0) updateSet.name = fields.name;
-  await db.update(users).set(updateSet).where(eq(users.id, userId));
+  await db.update(users3).set(updateSet).where(eq(users3.id, userId));
 }
 async function getMessageUsage(userId, advisor) {
   const db = await getDb();
   if (!db) return { used: 0, limit: 5, planType: "free", hasUsedStarter: false };
   const result = await db.select({
-    bizMessagesUsed: users.bizMessagesUsed,
-    founderMessagesUsed: users.founderMessagesUsed,
-    bizMessageLimit: users.bizMessageLimit,
-    founderMessageLimit: users.founderMessageLimit,
-    planTypeBiz: users.planTypeBiz,
-    planTypeFounder: users.planTypeFounder,
-    hasUsedBizStarter: users.hasUsedBizStarter,
-    hasUsedFounderStarter: users.hasUsedFounderStarter
-  }).from(users).where(eq(users.id, userId)).limit(1);
+    bizMessagesUsed: users3.bizMessagesUsed,
+    founderMessagesUsed: users3.founderMessagesUsed,
+    bizMessageLimit: users3.bizMessageLimit,
+    founderMessageLimit: users3.founderMessageLimit,
+    planTypeBiz: users3.planTypeBiz,
+    planTypeFounder: users3.planTypeFounder,
+    hasUsedBizStarter: users3.hasUsedBizStarter,
+    hasUsedFounderStarter: users3.hasUsedFounderStarter
+  }).from(users3).where(eq(users3.id, userId)).limit(1);
   const row = result[0];
   if (!row) return { used: 0, limit: 5, planType: "free", hasUsedStarter: false };
   if (advisor === "bizpilot") {
@@ -636,9 +923,9 @@ async function incrementMessageUsed(userId, advisor) {
   if (!db) return;
   const usage = await getMessageUsage(userId, advisor);
   if (advisor === "bizpilot") {
-    await db.update(users).set({ bizMessagesUsed: usage.used + 1 }).where(eq(users.id, userId));
+    await db.update(users3).set({ bizMessagesUsed: usage.used + 1 }).where(eq(users3.id, userId));
   } else {
-    await db.update(users).set({ founderMessagesUsed: usage.used + 1 }).where(eq(users.id, userId));
+    await db.update(users3).set({ founderMessagesUsed: usage.used + 1 }).where(eq(users3.id, userId));
   }
 }
 async function activateTieredPlan(userId, advisor, planType) {
@@ -661,7 +948,7 @@ async function activateTieredPlan(userId, advisor, planType) {
       updateData.subscriptionStart = now;
       updateData.subscriptionEnd = end;
     }
-    await db.update(users).set(updateData).where(eq(users.id, userId));
+    await db.update(users3).set(updateData).where(eq(users3.id, userId));
   } else {
     const updateData = {
       planTypeFounder: planType,
@@ -676,23 +963,23 @@ async function activateTieredPlan(userId, advisor, planType) {
       updateData.subscriptionStart = now;
       updateData.subscriptionEnd = end;
     }
-    await db.update(users).set(updateData).where(eq(users.id, userId));
+    await db.update(users3).set(updateData).where(eq(users3.id, userId));
   }
 }
 async function getFreeTrialCounts(userId) {
   const db = await getDb();
   if (!db) return { freeBizCount: 10, freeFounderCount: 5 };
-  const result = await db.select({ freeBizCount: users.freeBizCount, freeFounderCount: users.freeFounderCount }).from(users).where(eq(users.id, userId)).limit(1);
+  const result = await db.select({ freeBizCount: users3.freeBizCount, freeFounderCount: users3.freeFounderCount }).from(users3).where(eq(users3.id, userId)).limit(1);
   return result[0] ?? { freeBizCount: 10, freeFounderCount: 5 };
 }
 async function getOrCreateConversation(input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   if (input.conversationId) {
-    const existing = await db.select().from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, input.userId))).limit(1);
+    const existing = await db.select().from(conversations3).where(and(eq(conversations3.id, input.conversationId), eq(conversations3.userId, input.userId))).limit(1);
     if (existing.length > 0) return existing[0];
   }
-  const [row] = await db.insert(conversations).values({
+  const [row] = await db.insert(conversations3).values({
     userId: input.userId,
     modelSlug: input.modelSlug,
     title: input.title ?? null
@@ -702,23 +989,23 @@ async function getOrCreateConversation(input) {
 async function listUserConversations(userId, modelSlug, limit = 30) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(conversations).where(and(eq(conversations.userId, userId), eq(conversations.modelSlug, modelSlug))).orderBy(desc(conversations.updatedAt), desc(conversations.createdAt)).limit(limit);
+  return db.select().from(conversations3).where(and(eq(conversations3.userId, userId), eq(conversations3.modelSlug, modelSlug))).orderBy(desc(conversations3.updatedAt), desc(conversations3.createdAt)).limit(limit);
 }
 async function getConversationById(userId, conversationId) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId))).limit(1);
+  const result = await db.select().from(conversations3).where(and(eq(conversations3.id, conversationId), eq(conversations3.userId, userId))).limit(1);
   return result[0];
 }
 async function listConversationMessages(conversationId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(asc(messages.createdAt));
+  return db.select().from(messages3).where(eq(messages3.conversationId, conversationId)).orderBy(asc(messages3.createdAt));
 }
 async function createMessage(input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const [row] = await db.insert(messages).values({
+  const [row] = await db.insert(messages3).values({
     conversationId: input.conversationId,
     role: input.role,
     content: input.content,
@@ -729,38 +1016,38 @@ async function createMessage(input) {
 async function touchConversation(conversationId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(conversations).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq(conversations.id, conversationId));
+  await db.update(conversations3).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq(conversations3.id, conversationId));
 }
 async function deleteConversation(conversationId, userId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.delete(messages).where(eq(messages.conversationId, conversationId));
-  await db.delete(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
+  await db.delete(messages3).where(eq(messages3.conversationId, conversationId));
+  await db.delete(conversations3).where(and(eq(conversations3.id, conversationId), eq(conversations3.userId, userId)));
 }
 async function updateConversationTitle(conversationId, title) {
   const db = await getDb();
   if (!db) return;
-  await db.update(conversations).set({ title }).where(eq(conversations.id, conversationId));
+  await db.update(conversations3).set({ title }).where(eq(conversations3.id, conversationId));
 }
 async function getActiveSystemPrompt(modelSlug) {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.select().from(systemPrompts).where(and(eq(systemPrompts.modelSlug, modelSlug), eq(systemPrompts.isActive, "true"))).orderBy(desc(systemPrompts.version)).limit(1);
+  const result = await db.select().from(systemPrompts3).where(and(eq(systemPrompts3.modelSlug, modelSlug), eq(systemPrompts3.isActive, "true"))).orderBy(desc(systemPrompts3.version)).limit(1);
   return result[0]?.content ?? null;
 }
 async function listSystemPrompts() {
   const db = await assertDatabase();
-  return db.select().from(systemPrompts).orderBy(desc(systemPrompts.updatedAt));
+  return db.select().from(systemPrompts3).orderBy(desc(systemPrompts3.updatedAt));
 }
 async function createSystemPromptVersion(input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const existing = await db.select().from(systemPrompts).where(eq(systemPrompts.modelSlug, input.modelSlug)).orderBy(desc(systemPrompts.version)).limit(1);
+  const existing = await db.select().from(systemPrompts3).where(eq(systemPrompts3.modelSlug, input.modelSlug)).orderBy(desc(systemPrompts3.version)).limit(1);
   const nextVersion = (existing[0]?.version ?? 0) + 1;
   if (input.activate) {
-    await db.update(systemPrompts).set({ isActive: "false" }).where(eq(systemPrompts.modelSlug, input.modelSlug));
+    await db.update(systemPrompts3).set({ isActive: "false" }).where(eq(systemPrompts3.modelSlug, input.modelSlug));
   }
-  const [row] = await db.insert(systemPrompts).values({
+  const [row] = await db.insert(systemPrompts3).values({
     name: input.name,
     modelSlug: input.modelSlug,
     content: input.content,
@@ -772,61 +1059,61 @@ async function createSystemPromptVersion(input) {
 async function activateSystemPrompt(promptId, modelSlug) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(systemPrompts).set({ isActive: "false" }).where(eq(systemPrompts.modelSlug, modelSlug));
-  await db.update(systemPrompts).set({ isActive: "true" }).where(eq(systemPrompts.id, promptId));
+  await db.update(systemPrompts3).set({ isActive: "false" }).where(eq(systemPrompts3.modelSlug, modelSlug));
+  await db.update(systemPrompts3).set({ isActive: "true" }).where(eq(systemPrompts3.id, promptId));
 }
 async function getAiModel(targetRole) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(aiModels).where(eq(aiModels.targetRole, targetRole)).limit(1);
+  const result = await db.select().from(aiModels3).where(eq(aiModels3.targetRole, targetRole)).limit(1);
   return result[0];
 }
 async function listAllAiModels() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(aiModels).orderBy(asc(aiModels.targetRole));
+  return db.select().from(aiModels3).orderBy(asc(aiModels3.targetRole));
 }
 async function updateAiModel(targetRole, modelString) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(aiModels).set({ modelString, updatedAt: /* @__PURE__ */ new Date() }).where(eq(aiModels.targetRole, targetRole));
+  await db.update(aiModels3).set({ modelString, updatedAt: /* @__PURE__ */ new Date() }).where(eq(aiModels3.targetRole, targetRole));
 }
 async function getActiveApiKey(provider) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(apiKeys).where(and(eq(apiKeys.provider, provider), eq(apiKeys.isActive, "true"))).limit(1);
+  const result = await db.select().from(apiKeys3).where(and(eq(apiKeys3.provider, provider), eq(apiKeys3.isActive, "true"))).limit(1);
   return result[0];
 }
 async function listAllApiKeys() {
   const db = await assertDatabase();
-  const keys = await db.select().from(apiKeys).orderBy(desc(apiKeys.createdAt));
+  const keys = await db.select().from(apiKeys3).orderBy(desc(apiKeys3.createdAt));
   return keys.map((k) => ({ ...k, keyValue: k.keyValue.slice(0, 8) + "..." + k.keyValue.slice(-4), keyValueFull: k.keyValue }));
 }
 async function upsertApiKey(provider, keyValue) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(apiKeys).set({ isActive: "false" }).where(eq(apiKeys.provider, provider));
-  await db.insert(apiKeys).values({ provider, keyValue, isActive: "true" });
+  await db.update(apiKeys3).set({ isActive: "false" }).where(eq(apiKeys3.provider, provider));
+  await db.insert(apiKeys3).values({ provider, keyValue, isActive: "true" });
 }
 async function deleteApiKey(keyId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(apiKeys).set({ isActive: "false" }).where(eq(apiKeys.id, keyId));
+  await db.update(apiKeys3).set({ isActive: "false" }).where(eq(apiKeys3.id, keyId));
 }
 async function setApiKeyActive(keyId, provider) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(apiKeys).set({ isActive: "false" }).where(eq(apiKeys.provider, provider));
-  await db.update(apiKeys).set({ isActive: "true" }).where(eq(apiKeys.id, keyId));
+  await db.update(apiKeys3).set({ isActive: "false" }).where(eq(apiKeys3.provider, provider));
+  await db.update(apiKeys3).set({ isActive: "true" }).where(eq(apiKeys3.id, keyId));
 }
 async function listAllUsers() {
   const db = await assertDatabase();
-  return db.select().from(users).orderBy(desc(users.createdAt));
+  return db.select().from(users3).orderBy(desc(users3.createdAt));
 }
 async function updateUserRole(userId, role) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(users).set({ role }).where(eq(users.id, userId));
+  await db.update(users3).set({ role }).where(eq(users3.id, userId));
 }
 async function updateUserProfile(userId, data) {
   const db = await getDb();
@@ -838,7 +1125,7 @@ async function updateUserProfile(userId, data) {
   if (data.businessType !== void 0) updateSet.businessType = data.businessType;
   if (data.useCase !== void 0) updateSet.useCase = data.useCase;
   if (Object.keys(updateSet).length > 0) {
-    await db.update(users).set(updateSet).where(eq(users.id, userId));
+    await db.update(users3).set(updateSet).where(eq(users3.id, userId));
   }
 }
 async function updateUserSubscription(userId, plan, status) {
@@ -847,17 +1134,17 @@ async function updateUserSubscription(userId, plan, status) {
   const now = /* @__PURE__ */ new Date();
   const end = new Date(now);
   end.setMonth(end.getMonth() + 1);
-  await db.update(users).set({ plan, status, subscriptionStart: now, subscriptionEnd: end, updatedAt: now }).where(eq(users.id, userId));
+  await db.update(users3).set({ plan, status, subscriptionStart: now, subscriptionEnd: end, updatedAt: now }).where(eq(users3.id, userId));
 }
 async function deleteUser(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(users).where(eq(users.id, userId));
+  await db.delete(users3).where(eq(users3.id, userId));
 }
 async function createPayment(input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const [row] = await db.insert(payments).values({
+  const [row] = await db.insert(payments3).values({
     userId: input.userId ?? null,
     userName: input.userName ?? null,
     userEmail: input.userEmail ?? null,
@@ -874,17 +1161,17 @@ async function createPayment(input) {
 }
 async function listAllPayments() {
   const db = await assertDatabase();
-  return db.select().from(payments).orderBy(desc(payments.createdAt));
+  return db.select().from(payments3).orderBy(desc(payments3.createdAt));
 }
 async function listUserPayments(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(payments).where(eq(payments.userId, userId)).orderBy(desc(payments.createdAt));
+  return db.select().from(payments3).where(eq(payments3.userId, userId)).orderBy(desc(payments3.createdAt));
 }
 async function updatePaymentStatus(paymentId, status) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(payments).set({ status }).where(eq(payments.id, paymentId));
+  await db.update(payments3).set({ status }).where(eq(payments3.id, paymentId));
 }
 async function updatePayment(paymentId, fields) {
   const db = await getDb();
@@ -897,36 +1184,36 @@ async function updatePayment(paymentId, fields) {
   if (fields.transactionRef !== void 0) updateSet.transactionRef = fields.transactionRef;
   if (fields.notes !== void 0) updateSet.notes = fields.notes;
   if (fields.screenshotUrl !== void 0) updateSet.screenshotUrl = fields.screenshotUrl;
-  await db.update(payments).set(updateSet).where(eq(payments.id, paymentId));
+  await db.update(payments3).set(updateSet).where(eq(payments3.id, paymentId));
 }
 async function deletePayment(paymentId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.delete(payments).where(eq(payments.id, paymentId));
+  await db.delete(payments3).where(eq(payments3.id, paymentId));
 }
 async function getSystemSetting(key) {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
+  const result = await db.select().from(systemSettings3).where(eq(systemSettings3.key, key)).limit(1);
   return result[0]?.value ?? null;
 }
 async function setSystemSetting(key, value) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({
-    target: systemSettings.key,
+  await db.insert(systemSettings3).values({ key, value }).onConflictDoUpdate({
+    target: systemSettings3.key,
     set: { value, updatedAt: /* @__PURE__ */ new Date() }
   });
 }
 async function listSystemSettings() {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ key: systemSettings.key, value: systemSettings.value }).from(systemSettings);
+  return db.select({ key: systemSettings3.key, value: systemSettings3.value }).from(systemSettings3);
 }
 async function createApplication(input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const [row] = await db.insert(applications).values({
+  const [row] = await db.insert(applications3).values({
     fullName: input.fullName,
     email: input.email,
     phone: input.phone ?? null,
@@ -941,31 +1228,31 @@ async function createApplication(input) {
 }
 async function listAllApplications() {
   const db = await assertDatabase();
-  return db.select().from(applications).orderBy(desc(applications.createdAt));
+  return db.select().from(applications3).orderBy(desc(applications3.createdAt));
 }
 async function getApplicationById(id) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(applications).where(eq(applications.id, id)).limit(1);
+  const result = await db.select().from(applications3).where(eq(applications3.id, id)).limit(1);
   return result[0];
 }
 async function getApplicationByEmail(email) {
   const db = await getDb();
   if (!db) return void 0;
   const normalized = normalizeEmail(email);
-  const result = await db.select().from(applications).where(sql`lower(trim(${applications.email})) = ${normalized}`).orderBy(desc(applications.createdAt)).limit(1);
+  const result = await db.select().from(applications3).where(sql2`lower(trim(${applications3.email})) = ${normalized}`).orderBy(desc(applications3.createdAt)).limit(1);
   return result[0];
 }
 async function getApprovedApplicationByEmail(email) {
   const db = await getDb();
   if (!db) return void 0;
   const normalized = normalizeEmail(email);
-  const result = await db.select().from(applications).where(
+  const result = await db.select().from(applications3).where(
     and(
-      sql`lower(trim(${applications.email})) = ${normalized}`,
-      eq(applications.status, "approved")
+      sql2`lower(trim(${applications3.email})) = ${normalized}`,
+      eq(applications3.status, "approved")
     )
-  ).orderBy(desc(applications.createdAt)).limit(1);
+  ).orderBy(desc(applications3.createdAt)).limit(1);
   return result[0];
 }
 async function updateApplicationStatus(id, status, userId, notes) {
@@ -974,53 +1261,53 @@ async function updateApplicationStatus(id, status, userId, notes) {
   const updateSet = { status };
   if (userId !== void 0) updateSet.userId = userId;
   if (notes !== void 0) updateSet.notes = notes;
-  await db.update(applications).set(updateSet).where(eq(applications.id, id));
+  await db.update(applications3).set(updateSet).where(eq(applications3.id, id));
 }
 async function validateExternalApiToken(token) {
   const db = await getDb();
   if (!db) return false;
-  const result = await db.select().from(externalApiTokens).where(and(eq(externalApiTokens.token, token), eq(externalApiTokens.isActive, "true"))).limit(1);
+  const result = await db.select().from(externalApiTokens3).where(and(eq(externalApiTokens3.token, token), eq(externalApiTokens3.isActive, "true"))).limit(1);
   return result.length > 0;
 }
 async function listExternalApiTokens() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(externalApiTokens).orderBy(desc(externalApiTokens.createdAt));
+  return db.select().from(externalApiTokens3).orderBy(desc(externalApiTokens3.createdAt));
 }
 async function createExternalApiToken(name, token) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const [row] = await db.insert(externalApiTokens).values({ name, token, isActive: "true" }).returning();
+  const [row] = await db.insert(externalApiTokens3).values({ name, token, isActive: "true" }).returning();
   return row;
 }
 async function deleteExternalApiToken(id) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(externalApiTokens).set({ isActive: "false" }).where(eq(externalApiTokens.id, id));
+  await db.update(externalApiTokens3).set({ isActive: "false" }).where(eq(externalApiTokens3.id, id));
 }
 async function createAnnouncement(data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const [row] = await db.insert(announcements).values({ ...data, isActive: "true" }).returning();
+  const [row] = await db.insert(announcements3).values({ ...data, isActive: "true" }).returning();
   return row;
 }
 async function listAnnouncements(activeOnly = false) {
   const db = await getDb();
   if (!db) return [];
   if (activeOnly) {
-    return db.select().from(announcements).where(eq(announcements.isActive, "true")).orderBy(desc(announcements.createdAt));
+    return db.select().from(announcements3).where(eq(announcements3.isActive, "true")).orderBy(desc(announcements3.createdAt));
   }
-  return db.select().from(announcements).orderBy(desc(announcements.createdAt));
+  return db.select().from(announcements3).orderBy(desc(announcements3.createdAt));
 }
 async function updateAnnouncement(id, data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(announcements).set(data).where(eq(announcements.id, id));
+  await db.update(announcements3).set(data).where(eq(announcements3.id, id));
 }
 async function deleteAnnouncement(id) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.delete(announcements).where(eq(announcements.id, id));
+  await db.delete(announcements3).where(eq(announcements3.id, id));
 }
 
 // server/_core/cookies.ts
@@ -1511,16 +1798,19 @@ function registerOAuthRoutes(app2) {
         res.redirect(302, "/login-required?reason=unverified");
         return;
       }
-      const config = resolveDatabaseConfig();
-      if (!config) {
-        console.error("[Google OAuth] Database not configured \u2014 set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN on Vercel");
+      const turso = resolveTursoConfig();
+      const mysql2 = resolveMysqlUrl();
+      if (!turso && !mysql2) {
+        console.error(
+          "[Google OAuth] Database not configured \u2014 set TURSO_* or MYSQL_URL (legacy TiDB) on Vercel"
+        );
       } else {
-        console.info("[Google OAuth] Database target", {
-          target: maskDatabaseUrl(config.url),
-          source: config.source
+        console.info("[Google OAuth] Database targets", {
+          turso: turso ? maskDatabaseUrl(turso.url) : null,
+          mysql: mysql2 ? maskDatabaseUrl(mysql2) : null
         });
       }
-      const dbReady = await getDb();
+      const dbReady = await initializeDatabase();
       if (!dbReady) {
         console.error("[Google OAuth] Database connection failed \u2014 check Turso env vars");
       }
@@ -1878,7 +2168,7 @@ var normalizeResponseFormat = ({
 async function invokeLLM(params) {
   assertApiKey();
   const {
-    messages: messages2,
+    messages: messages4,
     tools,
     toolChoice,
     tool_choice,
@@ -1889,7 +2179,7 @@ async function invokeLLM(params) {
   } = params;
   const payload = {
     model: "gemini-2.5-flash",
-    messages: messages2.map(normalizeMessage)
+    messages: messages4.map(normalizeMessage)
   };
   if (tools && tools.length > 0) {
     payload.tools = tools;
@@ -1934,13 +2224,13 @@ async function invokeLLM(params) {
 // server/llmWithApiKey.ts
 var TEMPERATURE = 0.3;
 var MAX_OUTPUT_TOKENS = 4096;
-async function invokeAdvisorLLM(advisorSlug, messages2) {
+async function invokeAdvisorLLM(advisorSlug, messages4) {
   const aiModel = await getAiModel(advisorSlug);
   const modelString = aiModel?.modelString ?? "gemini-2.5-pro-preview-05-06";
   const isGeminiModel = modelString.startsWith("gemini");
-  const systemMsg = messages2.find((m) => m.role === "system");
+  const systemMsg = messages4.find((m) => m.role === "system");
   const systemPromptText = systemMsg?.content ?? "";
-  const chatMessages = messages2.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
+  const chatMessages = messages4.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
   if (isGeminiModel) {
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
@@ -1983,18 +2273,18 @@ async function invokeAdvisorLLM(advisorSlug, messages2) {
       }
     }
   }
-  const fallbackMessages = messages2.map((m) => ({ role: m.role, content: m.content }));
+  const fallbackMessages = messages4.map((m) => ({ role: m.role, content: m.content }));
   const response = await invokeLLM({ messages: fallbackMessages });
   const content = response.choices[0]?.message?.content;
   return typeof content === "string" ? content : "Sorry, I could not generate a response.";
 }
 async function invokeWithOpenAI(params) {
-  const messages2 = [];
+  const messages4 = [];
   if (params.systemPrompt) {
-    messages2.push({ role: "system", content: params.systemPrompt });
+    messages4.push({ role: "system", content: params.systemPrompt });
   }
   const sanitizedChat = sanitizeChatMessages(params.chatMessages);
-  messages2.push(...sanitizedChat);
+  messages4.push(...sanitizedChat);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -2003,7 +2293,7 @@ async function invokeWithOpenAI(params) {
     },
     body: JSON.stringify({
       model: params.model,
-      messages: messages2,
+      messages: messages4,
       max_tokens: MAX_OUTPUT_TOKENS,
       temperature: TEMPERATURE
     })
@@ -2056,13 +2346,13 @@ async function invokeWithGemini(params) {
     const blockReason = data?.promptFeedback?.blockReason;
     throw new Error(`Gemini returned no candidates. Block reason: ${blockReason ?? "unknown"}`);
   }
-  const text2 = candidate?.content?.parts?.[0]?.text;
-  return typeof text2 === "string" && text2.trim().length > 0 ? text2 : "No response generated.";
+  const text3 = candidate?.content?.parts?.[0]?.text;
+  return typeof text3 === "string" && text3.trim().length > 0 ? text3 : "No response generated.";
 }
-function sanitizeChatMessages(messages2) {
-  if (messages2.length === 0) return messages2;
+function sanitizeChatMessages(messages4) {
+  if (messages4.length === 0) return messages4;
   const result = [];
-  for (const msg of messages2) {
+  for (const msg of messages4) {
     const last = result[result.length - 1];
     if (last && last.role === msg.role) {
       last.content = `${last.content}
@@ -2084,7 +2374,7 @@ async function sendEmail({
   to,
   subject,
   html,
-  text: text2
+  text: text3
 }) {
   const user = process.env.GMAIL_USER;
   const pass = process.env.GMAIL_APP_PASSWORD;
@@ -2101,7 +2391,7 @@ async function sendEmail({
       from: `"PilotHub" <${user}>`,
       to,
       subject,
-      text: text2,
+      text: text3,
       html
     });
     console.log(`[Email] Sent to ${to}: ${subject}`);
@@ -2646,8 +2936,8 @@ Ref: ${input.transactionRef ?? "N/A"}`
     users: router({
       list: publicProcedure.query(async ({ ctx }) => {
         await requireAdmin(ctx);
-        const users2 = await listAllUsers();
-        return { users: users2 };
+        const users4 = await listAllUsers();
+        return { users: users4 };
       }),
       updateRole: publicProcedure.input(z2.object({ userId: z2.number(), role: z2.enum(["user", "admin"]) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
@@ -2681,8 +2971,8 @@ Ref: ${input.transactionRef ?? "N/A"}`
     payments: router({
       list: publicProcedure.query(async ({ ctx }) => {
         await requireAdmin(ctx);
-        const payments2 = await listAllPayments();
-        return { payments: payments2 };
+        const payments4 = await listAllPayments();
+        return { payments: payments4 };
       }),
       updateStatus: publicProcedure.input(z2.object({ paymentId: z2.number(), status: z2.enum(["pending", "confirmed", "rejected"]) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
@@ -3039,8 +3329,8 @@ Ref: ${transactionRef ?? "N/A"}`
   app2.get("/api/public/users/list", async (req, res) => {
     if (!await requireApiKey(req, res, true)) return;
     try {
-      const users2 = await listAllUsers();
-      res.json({ success: true, users: users2 });
+      const users4 = await listAllUsers();
+      res.json({ success: true, users: users4 });
     } catch (err) {
       console.error("[PublicAPI] /users/list error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
@@ -3110,8 +3400,8 @@ Ref: ${transactionRef ?? "N/A"}`
   app2.get("/api/public/payments/list", async (req, res) => {
     if (!await requireApiKey(req, res, true)) return;
     try {
-      const payments2 = await listAllPayments();
-      res.json({ success: true, payments: payments2 });
+      const payments4 = await listAllPayments();
+      res.json({ success: true, payments: payments4 });
     } catch (err) {
       console.error("[PublicAPI] /payments/list error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });

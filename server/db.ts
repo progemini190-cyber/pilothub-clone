@@ -1,8 +1,15 @@
-import { createClient } from "@libsql/client";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/libsql";
+import type { InsertUser } from "../drizzle/schema";
+import { ENV } from "./_core/env";
+import { shouldGrantAdminRole } from "./_core/adminAccess";
+import { pickCanonicalUser } from "./_core/userStatus";
 import {
-  InsertUser,
+  getDb,
+  initializeDatabase,
+  maskDatabaseUrl,
+  resolveMysqlUrl,
+  resolveTursoConfig,
+  getDatabaseProvider,
   users,
   conversations,
   messages,
@@ -14,162 +21,30 @@ import {
   applications,
   externalApiTokens,
   announcements,
-} from "../drizzle/schema";
-import { ENV } from './_core/env';
-import { shouldGrantAdminRole } from "./_core/adminAccess";
-import { pickCanonicalUser } from "./_core/userStatus";
+} from "./db/connection";
 
-let _db: ReturnType<typeof drizzle> | null = null;
-let _dbLogged = false;
-
-export type DatabaseConfig = {
-  url: string;
-  authToken: string | undefined;
-  source: "TURSO_DATABASE_URL" | "DATABASE_URL_DEV";
+export {
+  getDb,
+  initializeDatabase,
+  maskDatabaseUrl,
+  resolveMysqlUrl,
+  resolveTursoConfig,
+  getDatabaseProvider,
 };
+export type { InsertUser };
 
-/** Production uses Turso only. Dev may use DATABASE_URL (never file: in production). */
-export function resolveDatabaseConfig(): DatabaseConfig | null {
-  const tursoUrl = process.env.TURSO_DATABASE_URL?.trim();
-  const isProd =
-    process.env.NODE_ENV === "production" ||
-    process.env.VERCEL === "1" ||
-    ENV.isProduction;
-
-  if (tursoUrl?.startsWith("file:") && isProd) {
-    console.error("[Database] Production cannot use file: URLs — set TURSO_DATABASE_URL to libsql://…turso.io");
-    return null;
-  }
-
-  if (isProd) {
-    if (!tursoUrl) {
-      return null;
-    }
-    return {
-      url: tursoUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || undefined,
-      source: "TURSO_DATABASE_URL",
-    };
-  }
-
-  if (tursoUrl) {
-    return {
-      url: tursoUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || undefined,
-      source: "TURSO_DATABASE_URL",
-    };
-  }
-
-  const devUrl = process.env.DATABASE_URL?.trim();
-  if (devUrl) {
-    return {
-      url: devUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN?.trim() || undefined,
-      source: "DATABASE_URL_DEV",
-    };
-  }
-
-  return null;
-}
-
-export function maskDatabaseUrl(url: string): string {
-  try {
-    const normalized = url.replace(/^libsql:/, "https:");
-    const parsed = new URL(normalized);
-    const dbName = parsed.pathname.replace(/^\//, "") || "(default)";
-    return `${parsed.hostname}/${dbName}`;
-  } catch {
-    if (url.startsWith("file:")) return "file:***";
-    const at = url.indexOf("@");
-    if (at > 0) return url.slice(at + 1, at + 40);
-    return url.slice(0, 48);
-  }
-}
-
-function tokenFingerprint(token: string | undefined): string {
-  if (!token) return "missing";
-  if (token.length < 12) return "set-short";
-  return `set:${token.slice(0, 4)}…${token.slice(-4)}`;
-}
-
-async function logDatabaseHealth(database: ReturnType<typeof drizzle>): Promise<void> {
-  try {
-    const [userRow] = await database.select({ count: sql<number>`count(*)` }).from(users);
-    const [payRow] = await database.select({ count: sql<number>`count(*)` }).from(payments);
-    const [keyRow] = await database.select({ count: sql<number>`count(*)` }).from(apiKeys);
-    console.info("[Database] Health check", {
-      users: Number(userRow?.count ?? 0),
-      payments: Number(payRow?.count ?? 0),
-      apiKeys: Number(keyRow?.count ?? 0),
-    });
-  } catch (err) {
-    console.warn("[Database] Health check failed:", err);
-  }
-}
-
-export async function getDb() {
-  if (_db) return _db;
-
-  const config = resolveDatabaseConfig();
-  if (!config) {
-    if (!_dbLogged) {
-      console.error(
-        "[Database] TURSO_DATABASE_URL is not set (required in production). DATABASE_URL fallback is disabled on Vercel.",
-      );
-      _dbLogged = true;
-    }
-    return null;
-  }
-
-  if (config.url.startsWith("file:") && (ENV.isProduction || process.env.VERCEL === "1")) {
-    console.error("[Database] Refusing file: SQLite on Vercel/production");
-    return null;
-  }
-
-  const isRemote =
-    config.url.includes("turso.io") ||
-    config.url.startsWith("libsql://") ||
-    config.url.startsWith("https://");
-  if (isRemote && !config.authToken && !config.url.startsWith("file:")) {
-    console.error("[Database] TURSO_AUTH_TOKEN is required", {
-      target: maskDatabaseUrl(config.url),
-      source: config.source,
-    });
-    return null;
-  }
-
-  try {
-    const client = createClient({
-      url: config.url,
-      authToken: config.authToken,
-    });
-    _db = drizzle(client);
-    if (!_dbLogged) {
-      console.info("[Database] Connected", {
-        target: maskDatabaseUrl(config.url),
-        source: config.source,
-        token: tokenFingerprint(config.authToken),
-        nodeEnv: process.env.NODE_ENV ?? "unknown",
-        vercel: process.env.VERCEL === "1",
-      });
-      await logDatabaseHealth(_db);
-      _dbLogged = true;
-    }
-    return _db;
-  } catch (error) {
-    console.error("[Database] Failed to connect:", error, {
-      target: maskDatabaseUrl(config.url),
-      source: config.source,
-    });
-    return null;
-  }
+/** @deprecated Use resolveTursoConfig */
+export function resolveDatabaseConfig() {
+  const turso = resolveTursoConfig();
+  if (!turso) return null;
+  return { url: turso.url, authToken: turso.authToken, source: "TURSO_DATABASE_URL" as const };
 }
 
 export async function assertDatabase() {
   const database = await getDb();
   if (!database) {
     throw new Error(
-      "Database unavailable. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in your deployment environment.",
+      "Database unavailable. Set TURSO_DATABASE_URL + TURSO_AUTH_TOKEN, or MYSQL_URL for legacy TiDB data.",
     );
   }
   return database;

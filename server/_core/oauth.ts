@@ -378,16 +378,19 @@ export function registerOAuthRoutes(app: Express) {
         return;
       }
 
-      const config = db.resolveDatabaseConfig();
-      if (!config) {
-        console.error("[Google OAuth] Database not configured — set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN on Vercel");
+      const turso = db.resolveTursoConfig();
+      const mysql = db.resolveMysqlUrl();
+      if (!turso && !mysql) {
+        console.error(
+          "[Google OAuth] Database not configured — set TURSO_* or MYSQL_URL (legacy TiDB) on Vercel",
+        );
       } else {
-        console.info("[Google OAuth] Database target", {
-          target: db.maskDatabaseUrl(config.url),
-          source: config.source,
+        console.info("[Google OAuth] Database targets", {
+          turso: turso ? db.maskDatabaseUrl(turso.url) : null,
+          mysql: mysql ? db.maskDatabaseUrl(mysql) : null,
         });
       }
-      const dbReady = await db.getDb();
+      const dbReady = await db.initializeDatabase();
       if (!dbReady) {
         console.error("[Google OAuth] Database connection failed — check Turso env vars");
       }
