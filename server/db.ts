@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, asc, sql, inArray, or } from "drizzle-orm";
 import type { InsertUser } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { shouldGrantAdminRole } from "./_core/adminAccess";
@@ -520,6 +520,37 @@ export async function setApiKeyActive(keyId: number, provider: string) {
 export async function listAllUsers() {
   const db = await assertDatabase();
   return db.select().from(users).orderBy(desc(users.createdAt));
+}
+
+/** Users eligible for admin email broadcast (approved / active with email). */
+export async function listApprovedUserEmails(): Promise<
+  Array<{ id: number; email: string; name: string | null }>
+> {
+  const db = await assertDatabase();
+  const rows = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      status: users.status,
+    })
+    .from(users)
+    .where(
+      or(
+        eq(users.status, "approved"),
+        eq(users.status, "active"),
+        eq(users.status, "APPROVED"),
+      ),
+    )
+    .orderBy(desc(users.createdAt));
+
+  return rows
+    .filter((r) => typeof r.email === "string" && r.email.trim().length > 0)
+    .map((r) => ({
+      id: r.id,
+      email: r.email!.trim(),
+      name: r.name,
+    }));
 }
 
 export async function updateUserRole(userId: number, role: "user" | "admin") {

@@ -15,6 +15,7 @@ import type { Express, Request, Response } from "express";
 import * as db from "./db";
 import { nanoid } from "nanoid";
 import { notifyOwner } from "./_core/notification";
+import { sendNewApplicationNotificationEmail } from "./emailHelper";
 import { generateTelegramActivationToken } from "./telegram";
 import { quickCreateTelegramUser, parsePlanType } from "./quickCreateUser";
 import { getTelegramBizBotUsername } from "./telegram";
@@ -148,7 +149,22 @@ export function registerPublicApiRoutes(app: Express) {
         paymentId = payment.id;
       }
 
-      // Notify admin
+      try {
+        await sendNewApplicationNotificationEmail({
+          fullName,
+          email,
+          phone,
+          businessName,
+          businessType,
+          useCase,
+          plan: validPlan,
+          source: "external_api",
+          applicationId: app_.id,
+        });
+      } catch (e) {
+        console.error("[PublicAPI] Application notification email failed:", e);
+      }
+
       try {
         await notifyOwner({
           title: `📋 External Application: ${fullName} (${validPlan})`,

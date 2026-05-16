@@ -13,7 +13,12 @@ import {
 import { quickCreateTelegramUser } from "./quickCreateUser";
 import { notifyOwner } from "./_core/notification";
 import { storagePut } from "./storage";
-import { sendApprovalEmail as sendApprovalEmailHelper, sendPaymentConfirmationEmail } from "./emailHelper";
+import {
+  sendApprovalEmail as sendApprovalEmailHelper,
+  sendPaymentConfirmationEmail,
+  sendNewApplicationNotificationEmail,
+  sendBroadcastEmail,
+} from "./emailHelper";
 import { isAdminEmail } from "./_core/adminAccess";
 
 const COOKIE_NAME = "app_session_id";
@@ -133,7 +138,21 @@ export const appRouter = router({
           plan: input.plan,
           source: "website",
         });
-        // Notify admin
+        try {
+          await sendNewApplicationNotificationEmail({
+            fullName: input.fullName,
+            email: normalizedEmail,
+            phone: input.phone,
+            businessName: input.businessName,
+            businessType: input.businessType,
+            useCase: input.useCase,
+            plan: input.plan,
+            source: "website",
+            applicationId: app.id,
+          });
+        } catch (e) {
+          console.error("[applications.submit] Application notification email failed:", e);
+        }
         try {
           await notifyOwner({
             title: `📋 New Application: ${input.fullName}`,
@@ -910,6 +929,64 @@ export const appRouter = router({
           }
         }),
     }),
+
+    sendBroadcastEmail: publicProcedure
+      .input(
+        z.object({
+          mode: z.enum(["all_approved", "single"]),
+          userId: z.number().int().positive().optional(),
+          subject: z.string().min(1).max(200),
+          message: z.string().min(1).max(20000),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        await requireAdmin(ctx);
+
+        let recipients: Array<{ id: number; email: string; name: string | null }>;
+
+        if (input.mode === "single") {
+          if (!input.userId) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "userId is required for single-user broadcast",
+            });
+          }
+          const user = await db.getUserById(input.userId);
+          if (!user?.email?.trim()) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "User not found or has no email" });
+          }
+          recipients = [
+            { id: user.id, email: user.email.trim(), name: user.name ?? null },
+          ];
+        } else {
+          recipients = await db.listApprovedUserEmails();
+          if (recipients.length === 0) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "No approved users with email addresses found",
+            });
+          }
+        }
+
+        let sent = 0;
+        let failed = 0;
+        for (const recipient of recipients) {
+          const ok = await sendBroadcastEmail({
+            to: recipient.email,
+            subject: input.subject,
+            message: input.message,
+          });
+          if (ok) sent += 1;
+          else failed += 1;
+        }
+
+        return {
+          success: failed === 0,
+          sent,
+          failed,
+          total: recipients.length,
+        };
+      }),
 
     // ── External API Token management ──
     externalTokens: router({
