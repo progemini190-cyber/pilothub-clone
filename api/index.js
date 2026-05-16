@@ -1129,6 +1129,7 @@ async function activateTieredPlan(userId, advisor, planType) {
       updateData.hasUsedBizStarter = "true";
     } else {
       updateData.bizMessageLimit = 999999;
+      updateData.planExpiryDate = end;
       updateData.subscriptionStart = now;
       updateData.subscriptionEnd = end;
     }
@@ -1144,6 +1145,7 @@ async function activateTieredPlan(userId, advisor, planType) {
       updateData.hasUsedFounderStarter = "true";
     } else {
       updateData.founderMessageLimit = 999999;
+      updateData.planExpiryDate = end;
       updateData.subscriptionStart = now;
       updateData.subscriptionEnd = end;
     }
@@ -3577,15 +3579,6 @@ init_storage();
 import nodemailer from "nodemailer";
 var PILOTHUB_ADMIN_NOTIFICATION_EMAIL = "chatpilot.mm@gmail.com";
 var PILOTHUB_LOGO_URL = "https://www.pilothub.vip/pilothub-logo.png";
-function getSmtpUser() {
-  return process.env.GMAIL_USER?.trim();
-}
-function getPilotHubEmailFrom() {
-  const smtpUser = getSmtpUser();
-  const noreply = process.env.PILOTHUB_NOREPLY_EMAIL?.trim() || "noreply@pilothub.vip";
-  const fromAddress = noreply.includes("@") ? noreply : smtpUser ?? noreply;
-  return `"PilotHub Team" <${fromAddress}>`;
-}
 function wrapPilotHubEmailHtml(bodyHtml) {
   return `<!DOCTYPE html>
 <html>
@@ -3618,28 +3611,35 @@ async function sendEmail({
   html,
   text: text3
 }) {
-  const user = getSmtpUser();
-  const pass = process.env.GMAIL_APP_PASSWORD;
+  const user = process.env.GMAIL_USER?.trim();
+  const pass = process.env.GMAIL_APP_PASSWORD?.trim();
   if (!user || !pass) {
-    console.warn("[Email] GMAIL_USER or GMAIL_APP_PASSWORD not set. Email not sent.");
+    console.warn("[Email] GMAIL_USER or GMAIL_APP_PASSWORD not set. Email not sent.", {
+      hasUser: Boolean(user),
+      hasPass: Boolean(pass)
+    });
     return false;
   }
+  const from = `"PilotHub Team" <${user}>`;
   try {
     const transporter = nodemailer.createTransport({
       service: "gmail",
-      auth: { user, pass }
+      auth: {
+        user,
+        pass: pass.replace(/\s/g, "")
+      }
     });
     await transporter.sendMail({
-      from: getPilotHubEmailFrom(),
+      from,
       to,
       subject,
       text: text3,
       html
     });
-    console.log(`[Email] Sent to ${to}: ${subject}`);
+    console.log(`[Email] Sent to ${to}: ${subject} (from ${user})`);
     return true;
-  } catch (err) {
-    console.error("[Email] Failed to send:", err);
+  } catch (error) {
+    console.error("Email send error details: ", error);
     return false;
   }
 }

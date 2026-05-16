@@ -4,20 +4,13 @@ export const PILOTHUB_ADMIN_NOTIFICATION_EMAIL = "chatpilot.mm@gmail.com";
 
 const PILOTHUB_LOGO_URL = "https://www.pilothub.vip/pilothub-logo.png";
 
-/** Verified Gmail account used for SMTP auth (display name overridden below). */
-function getSmtpUser(): string | undefined {
-  return process.env.GMAIL_USER?.trim();
-}
-
 /**
- * Sender shown in inboxes: "PilotHub Team" <noreply@pilothub.vip> when configured,
- * otherwise "PilotHub Team" <GMAIL_USER>.
+ * Gmail requires the From address to match the authenticated account.
+ * Do not use unverified aliases (e.g. noreply@pilothub.vip).
  */
 export function getPilotHubEmailFrom(): string {
-  const smtpUser = getSmtpUser();
-  const noreply = process.env.PILOTHUB_NOREPLY_EMAIL?.trim() || "noreply@pilothub.vip";
-  const fromAddress = noreply.includes("@") ? noreply : smtpUser ?? noreply;
-  return `"PilotHub Team" <${fromAddress}>`;
+  const user = process.env.GMAIL_USER?.trim() ?? "";
+  return `"PilotHub Team" <${user}>`;
 }
 
 /** Base HTML wrapper with PilotHub logo and dark theme layout. */
@@ -69,32 +62,40 @@ export async function sendEmail({
   html?: string;
   text?: string;
 }): Promise<boolean> {
-  const user = getSmtpUser();
-  const pass = process.env.GMAIL_APP_PASSWORD;
+  const user = process.env.GMAIL_USER?.trim();
+  const pass = process.env.GMAIL_APP_PASSWORD?.trim();
 
   if (!user || !pass) {
-    console.warn("[Email] GMAIL_USER or GMAIL_APP_PASSWORD not set. Email not sent.");
+    console.warn("[Email] GMAIL_USER or GMAIL_APP_PASSWORD not set. Email not sent.", {
+      hasUser: Boolean(user),
+      hasPass: Boolean(pass),
+    });
     return false;
   }
+
+  const from = `"PilotHub Team" <${user}>`;
 
   try {
     const transporter = nodemailer.createTransport({
       service: "gmail",
-      auth: { user, pass },
+      auth: {
+        user,
+        pass: pass.replace(/\s/g, ""),
+      },
     });
 
     await transporter.sendMail({
-      from: getPilotHubEmailFrom(),
+      from,
       to,
       subject,
       text,
       html,
     });
 
-    console.log(`[Email] Sent to ${to}: ${subject}`);
+    console.log(`[Email] Sent to ${to}: ${subject} (from ${user})`);
     return true;
-  } catch (err) {
-    console.error("[Email] Failed to send:", err);
+  } catch (error) {
+    console.error("Email send error details: ", error);
     return false;
   }
 }
