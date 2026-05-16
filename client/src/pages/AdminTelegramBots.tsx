@@ -10,6 +10,13 @@ import {
   getTelegramFounderBotUsername,
   isTelegramBotUsernameConfigured,
 } from "@/lib/telegramConfig";
+import {
+  addTelegramPlanMonths,
+  inferTelegramPlanTierFromLimit,
+  TELEGRAM_STARTER_ALREADY_USED_BIZ,
+  TELEGRAM_STARTER_ALREADY_USED_FOUNDER,
+  type TelegramPlanTier,
+} from "@shared/telegramPlans";
 
 type TelegramUser = {
   id: number;
@@ -21,6 +28,8 @@ type TelegramUser = {
   planTypeBiz: string;
   planTypeFounder: string;
   planExpiryDate: Date | string | null;
+  hasUsedBizStarter: boolean;
+  hasUsedFounderStarter: boolean;
 };
 
 function formatDate(value: Date | string | null | undefined) {
@@ -63,10 +72,8 @@ export default function AdminTelegramBots() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [manageUser, setManageUser] = useState<TelegramUser | null>(null);
-  const [bizLimit, setBizLimit] = useState("");
-  const [founderLimit, setFounderLimit] = useState("");
-  const [addBiz, setAddBiz] = useState(false);
-  const [addFounder, setAddFounder] = useState(false);
+  const [manageBizTier, setManageBizTier] = useState<TelegramPlanTier>("starter");
+  const [manageFounderTier, setManageFounderTier] = useState<TelegramPlanTier>("starter");
   const [expiryDate, setExpiryDate] = useState("");
   const [linkModal, setLinkModal] = useState<{ user: TelegramUser; link: string; token: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -74,8 +81,7 @@ export default function AdminTelegramBots() {
   const [quickName, setQuickName] = useState("");
   const [quickEmail, setQuickEmail] = useState("");
   const [quickPlanType, setQuickPlanType] = useState<"bizpilot" | "founderpilot">("bizpilot");
-  const [quickBizLimit, setQuickBizLimit] = useState("20");
-  const [quickFounderLimit, setQuickFounderLimit] = useState("0");
+  const [quickPlanTier, setQuickPlanTier] = useState<TelegramPlanTier>("starter");
   const [quickExpiry, setQuickExpiry] = useState(toDateInputValue(addMonths(new Date(), 1)));
 
   const { data: telegramSettings } = trpc.admin.telegram.getSettings.useQuery(undefined, {
@@ -138,8 +144,7 @@ export default function AdminTelegramBots() {
       setQuickName("");
       setQuickEmail("");
       setQuickPlanType("bizpilot");
-      setQuickBizLimit("20");
-      setQuickFounderLimit("0");
+      setQuickPlanTier("starter");
       setQuickExpiry(toDateInputValue(addMonths(new Date(), 1)));
       setLinkModal({
         user: {
@@ -147,11 +152,13 @@ export default function AdminTelegramBots() {
           email: result.email,
           name: result.name,
           telegramChatId: null,
-          bizMessageLimit: parseInt(quickBizLimit, 10) || 20,
-          founderMessageLimit: parseInt(quickFounderLimit, 10) || 0,
-          planTypeBiz: quickPlanType === "bizpilot" ? "starter" : "free",
-          planTypeFounder: quickPlanType === "founderpilot" ? "starter" : "free",
+          bizMessageLimit: quickPlanType === "bizpilot" ? (quickPlanTier === "unlimited" ? 999999 : 20) : 0,
+          founderMessageLimit: quickPlanType === "founderpilot" ? (quickPlanTier === "unlimited" ? 999999 : 20) : 0,
+          planTypeBiz: quickPlanType === "bizpilot" ? quickPlanTier === "unlimited" ? "pro" : "starter" : "free",
+          planTypeFounder: quickPlanType === "founderpilot" ? quickPlanTier === "unlimited" ? "pro" : "starter" : "free",
           planExpiryDate: quickExpiry,
+          hasUsedBizStarter: quickPlanType === "bizpilot" && quickPlanTier === "starter",
+          hasUsedFounderStarter: quickPlanType === "founderpilot" && quickPlanTier === "starter",
         },
         link: result.activationLink,
         token: result.token,
@@ -211,34 +218,20 @@ export default function AdminTelegramBots() {
 
   const openManageModal = (user: TelegramUser) => {
     setManageUser(user);
-    setBizLimit(String(user.bizMessageLimit ?? 0));
-    setFounderLimit(String(user.founderMessageLimit ?? 0));
-    setAddBiz(false);
-    setAddFounder(false);
+    setManageBizTier(inferTelegramPlanTierFromLimit(user.bizMessageLimit));
+    setManageFounderTier(inferTelegramPlanTierFromLimit(user.founderMessageLimit));
     setExpiryDate(toDateInputValue(user.planExpiryDate) || toDateInputValue(addMonths(new Date(), 1)));
   };
 
   const handleSavePlan = () => {
     if (!manageUser) return;
-    const biz = parseInt(bizLimit, 10);
-    const founder = parseInt(founderLimit, 10);
-    if (Number.isNaN(biz) || biz < 0 || Number.isNaN(founder) || founder < 0) {
-      toast.error("Enter valid message limits");
-      return;
-    }
 
-    const payload: Parameters<typeof updatePlan.mutate>[0] = {
+    updatePlan.mutate({
       userId: manageUser.id,
+      bizPlanTier: manageBizTier,
+      founderPlanTier: manageFounderTier,
       planExpiryDate: expiryDate || null,
-    };
-
-    if (addBiz) payload.addBizMessages = biz;
-    else payload.bizMessageLimit = biz;
-
-    if (addFounder) payload.addFounderMessages = founder;
-    else payload.founderMessageLimit = founder;
-
-    updatePlan.mutate(payload);
+    });
   };
 
   const copyLink = (link: string) => {
@@ -253,10 +246,27 @@ export default function AdminTelegramBots() {
     setQuickName("");
     setQuickEmail("");
     setQuickPlanType("bizpilot");
-    setQuickBizLimit("20");
-    setQuickFounderLimit("0");
+    setQuickPlanTier("starter");
     setQuickExpiry(toDateInputValue(addMonths(new Date(), 1)));
     setShowQuickAdd(true);
+  };
+
+  const handleQuickPlanTierChange = (tier: TelegramPlanTier) => {
+    setQuickPlanTier(tier);
+    if (tier === "unlimited") {
+      setQuickExpiry(toDateInputValue(addTelegramPlanMonths()));
+    }
+  };
+
+  const handleManageTierChange = (
+    side: "biz" | "founder",
+    tier: TelegramPlanTier,
+  ) => {
+    if (side === "biz") setManageBizTier(tier);
+    else setManageFounderTier(tier);
+    if (tier === "unlimited") {
+      setExpiryDate(toDateInputValue(addTelegramPlanMonths()));
+    }
   };
 
   const handleQuickAddSave = () => {
@@ -264,21 +274,80 @@ export default function AdminTelegramBots() {
       toast.error("Name and email are required");
       return;
     }
-    const biz = parseInt(quickBizLimit, 10);
-    const founder = parseInt(quickFounderLimit, 10);
-    if (Number.isNaN(biz) || biz < 0 || Number.isNaN(founder) || founder < 0) {
-      toast.error("Enter valid limits");
-      return;
-    }
     quickAddUser.mutate({
       name: quickName.trim(),
       email: quickEmail.trim(),
       planType: quickPlanType,
-      bizMessageLimit: biz,
-      founderMessageLimit: founder,
+      planTier: quickPlanTier,
       planExpiryDate: quickExpiry || undefined,
     });
   };
+
+  const PlanTierOptions = ({
+    name,
+    value,
+    onChange,
+    starterUsed,
+    starterUsedMessage,
+    checkedBg,
+    checkedBorder,
+  }: {
+    name: string;
+    value: TelegramPlanTier;
+    onChange: (tier: TelegramPlanTier) => void;
+    starterUsed: boolean;
+    starterUsedMessage: string;
+    checkedBg: string;
+    checkedBorder: string;
+  }) => (
+    <div className="space-y-2" role="group">
+      {(
+        [
+          { tier: "starter" as const, label: "Starter (20 Messages)" },
+          { tier: "unlimited" as const, label: "Unlimited (1 Month)" },
+        ] as const
+      ).map((opt) => {
+        const disabled = opt.tier === "starter" && starterUsed;
+        const checked = value === opt.tier;
+        return (
+          <label
+            key={`${name}-${opt.tier}`}
+            className="flex items-start gap-3 p-3 rounded-xl transition"
+            style={{
+              background: checked ? checkedBg : "oklch(20% 0.04 220)",
+              border: `1px solid ${checked ? checkedBorder : "oklch(28% 0.04 220)"}`,
+              opacity: disabled ? 0.55 : 1,
+              cursor: disabled ? "not-allowed" : "pointer",
+            }}
+            title={disabled ? starterUsedMessage : undefined}
+          >
+            <input
+              type="radio"
+              name={name}
+              value={opt.tier}
+              checked={checked}
+              disabled={disabled}
+              onChange={() => onChange(opt.tier)}
+              className="mt-1"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-white">{opt.label}</span>
+              {opt.tier === "unlimited" && (
+                <span className="block text-xs mt-0.5" style={{ color: "oklch(55% 0.03 220)" }}>
+                  999,999 messages · expiry +1 month
+                </span>
+              )}
+              {disabled && (
+                <span className="block text-xs mt-1" style={{ color: "oklch(75% 0.18 25)" }}>
+                  {starterUsedMessage}
+                </span>
+              )}
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
 
   if (isError) {
     const message = error?.message ?? "Unknown error";
@@ -598,35 +667,31 @@ export default function AdminTelegramBots() {
                 <input type="email" value={quickEmail} onChange={(e) => setQuickEmail(e.target.value)} placeholder="user@example.com" style={inputStyle} />
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(65% 0.03 220)" }}>Primary plan</label>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(65% 0.03 220)" }}>Primary advisor</label>
                 <select
                   value={quickPlanType}
-                  onChange={(e) => {
-                    const p = e.target.value as "bizpilot" | "founderpilot";
-                    setQuickPlanType(p);
-                    if (p === "bizpilot") {
-                      setQuickBizLimit("20");
-                      setQuickFounderLimit("0");
-                    } else {
-                      setQuickBizLimit("0");
-                      setQuickFounderLimit("20");
-                    }
-                  }}
+                  onChange={(e) => setQuickPlanType(e.target.value as "bizpilot" | "founderpilot")}
                   style={inputStyle}
                 >
                   <option value="bizpilot">BizPilot</option>
                   <option value="founderpilot">FounderPilot</option>
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(65% 0.22 250)" }}>Biz limit</label>
-                  <input type="number" min={0} value={quickBizLimit} onChange={(e) => setQuickBizLimit(e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "oklch(78% 0.12 75)" }}>Founder limit</label>
-                  <input type="number" min={0} value={quickFounderLimit} onChange={(e) => setQuickFounderLimit(e.target.value)} style={inputStyle} />
-                </div>
+              <div>
+                <label className="block text-xs font-semibold mb-2" style={{ color: "oklch(65% 0.03 220)" }}>Plan tier</label>
+                <PlanTierOptions
+                  name="quick-plan-tier"
+                  value={quickPlanTier}
+                  onChange={handleQuickPlanTierChange}
+                  starterUsed={false}
+                  starterUsedMessage={
+                    quickPlanType === "bizpilot"
+                      ? TELEGRAM_STARTER_ALREADY_USED_BIZ
+                      : TELEGRAM_STARTER_ALREADY_USED_FOUNDER
+                  }
+                  checkedBg="oklch(72% 0.18 162 / 0.12)"
+                  checkedBorder="oklch(72% 0.18 162 / 0.35)"
+                />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -670,42 +735,32 @@ export default function AdminTelegramBots() {
 
             <div className="space-y-4">
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold" style={{ color: "oklch(65% 0.22 250)" }}>
-                    BizPilot messages
-                  </label>
-                  <label className="flex items-center gap-1.5 text-xs" style={{ color: "oklch(55% 0.03 220)" }}>
-                    <input type="checkbox" checked={addBiz} onChange={(e) => setAddBiz(e.target.checked)} />
-                    Add to current
-                  </label>
-                </div>
-                <input
-                  type="number"
-                  min={0}
-                  value={bizLimit}
-                  onChange={(e) => setBizLimit(e.target.value)}
-                  placeholder="e.g. 20"
-                  style={inputStyle}
+                <label className="block text-xs font-semibold mb-2" style={{ color: "oklch(65% 0.22 250)" }}>
+                  BizPilot plan tier
+                </label>
+                <PlanTierOptions
+                  name="manage-biz-tier"
+                  value={manageBizTier}
+                  onChange={(tier) => handleManageTierChange("biz", tier)}
+                  starterUsed={manageUser.hasUsedBizStarter}
+                  starterUsedMessage={TELEGRAM_STARTER_ALREADY_USED_BIZ}
+                  checkedBg="oklch(65% 0.22 250 / 0.12)"
+                  checkedBorder="oklch(65% 0.22 250 / 0.35)"
                 />
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold" style={{ color: "oklch(78% 0.12 75)" }}>
-                    FounderPilot messages
-                  </label>
-                  <label className="flex items-center gap-1.5 text-xs" style={{ color: "oklch(55% 0.03 220)" }}>
-                    <input type="checkbox" checked={addFounder} onChange={(e) => setAddFounder(e.target.checked)} />
-                    Add to current
-                  </label>
-                </div>
-                <input
-                  type="number"
-                  min={0}
-                  value={founderLimit}
-                  onChange={(e) => setFounderLimit(e.target.value)}
-                  placeholder="e.g. 20"
-                  style={inputStyle}
+                <label className="block text-xs font-semibold mb-2" style={{ color: "oklch(78% 0.12 75)" }}>
+                  FounderPilot plan tier
+                </label>
+                <PlanTierOptions
+                  name="manage-founder-tier"
+                  value={manageFounderTier}
+                  onChange={(tier) => handleManageTierChange("founder", tier)}
+                  starterUsed={manageUser.hasUsedFounderStarter}
+                  starterUsedMessage={TELEGRAM_STARTER_ALREADY_USED_FOUNDER}
+                  checkedBg="oklch(78% 0.12 75 / 0.12)"
+                  checkedBorder="oklch(78% 0.12 75 / 0.35)"
                 />
               </div>
 

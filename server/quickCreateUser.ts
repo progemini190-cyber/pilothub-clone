@@ -6,6 +6,10 @@ import { nanoid } from "nanoid";
 import * as db from "./db";
 import { ensureTelegramSchema } from "./db/ensureTelegramSchema";
 import { generateTelegramActivationToken } from "./telegram";
+import {
+  addTelegramPlanMonths,
+  type TelegramPlanTier,
+} from "@shared/telegramPlans";
 
 export type PlanTypeInput = "bizpilot" | "founderpilot";
 
@@ -13,8 +17,7 @@ export type QuickCreateUserInput = {
   email: string;
   name: string;
   planType: PlanTypeInput;
-  bizMessageLimit?: number;
-  founderMessageLimit?: number;
+  planTier: TelegramPlanTier;
   planExpiryDate?: Date | null;
   botUsername?: string;
 };
@@ -25,6 +28,7 @@ export type QuickCreateUserResult = {
   email: string;
   name: string;
   planType: PlanTypeInput;
+  planTier: TelegramPlanTier;
   created: boolean;
   token: string;
   activationLink: string;
@@ -35,30 +39,8 @@ export function generateShadowOpenId(): string {
   return `shadow_${nanoid(24)}`;
 }
 
-function defaultExpiryOneMonth(): Date {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1);
-  return d;
-}
-
-function resolveLimits(input: QuickCreateUserInput): {
-  bizMessageLimit: number;
-  founderMessageLimit: number;
-} {
-  const biz =
-    input.bizMessageLimit ??
-    (input.planType === "bizpilot" ? 20 : 0);
-  const founder =
-    input.founderMessageLimit ??
-    (input.planType === "founderpilot" ? 20 : 0);
-  return {
-    bizMessageLimit: Math.max(0, biz),
-    founderMessageLimit: Math.max(0, founder),
-  };
-}
-
 /**
- * Find user by email or create a shadow account, apply Telegram plan limits, issue activation token.
+ * Find user by email or create a shadow account, apply Telegram plan tier, issue activation token.
  */
 export async function quickCreateTelegramUser(
   input: QuickCreateUserInput,
@@ -91,13 +73,12 @@ export async function quickCreateTelegramUser(
     await db.updateUserProfile(user.id, { name });
   }
 
-  const limits = resolveLimits(input);
-  await db.updateTelegramUserPlan({
-    userId: user.id,
-    bizMessageLimit: limits.bizMessageLimit,
-    founderMessageLimit: limits.founderMessageLimit,
-    planExpiryDate: input.planExpiryDate ?? defaultExpiryOneMonth(),
-  });
+  const expiry =
+    input.planTier === "unlimited"
+      ? input.planExpiryDate ?? addTelegramPlanMonths()
+      : input.planExpiryDate ?? addTelegramPlanMonths();
+
+  await db.applyTelegramAdvisorPlan(user.id, input.planType, input.planTier, expiry);
 
   await db.updateUserSubscription(user.id, input.planType, "active");
 
@@ -113,6 +94,7 @@ export async function quickCreateTelegramUser(
     email: user.email ?? email,
     name: user.name ?? name,
     planType: input.planType,
+    planTier: input.planTier,
     created,
     token: tokenResult.token,
     activationLink: tokenResult.activationLink,

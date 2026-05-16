@@ -18,6 +18,7 @@ import {
   resolveTelegramFounderBotUsername,
   TELEGRAM_BOT_USERNAME_PLACEHOLDER,
 } from "@shared/telegramConfig";
+import { isUnlimitedTelegramLimit } from "@shared/telegramPlans";
 
 export { TELEGRAM_BOT_USERNAME_PLACEHOLDER };
 
@@ -232,9 +233,9 @@ async function handleChatMessage(
   }
 
   const isBiz = advisorSlug === "bizpilot";
-  const currentLimit = db.coerceTelegramMessageLimit(
-    isBiz ? user.bizMessageLimit : user.founderMessageLimit,
-  );
+  const rawLimit = isBiz ? user.bizMessageLimit : user.founderMessageLimit;
+  const isUnlimited = isUnlimitedTelegramLimit(rawLimit);
+  const currentLimit = db.coerceTelegramMessageLimit(rawLimit);
   const isExpired = !db.isTelegramPlanActive(user.planExpiryDate ?? null);
 
   console.log("Credit check:", {
@@ -242,6 +243,7 @@ async function handleChatMessage(
     advisorQuery,
     advisorSlug,
     isBiz,
+    isUnlimited,
     currentLimit,
     bizMessageLimit: user.bizMessageLimit,
     founderMessageLimit: user.founderMessageLimit,
@@ -249,7 +251,17 @@ async function handleChatMessage(
     isExpired,
   });
 
-  if (currentLimit <= 0 || isExpired) {
+  if (isUnlimited) {
+    if (isExpired) {
+      console.log("[Telegram] Unlimited plan expired — denying access", {
+        userId: user.id,
+        chatId,
+        isBiz,
+      });
+      await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
+      return;
+    }
+  } else if (currentLimit <= 0 || isExpired) {
     console.log("[Telegram] Credit check failed — denying access", {
       userId: user.id,
       advisorQuery,
@@ -307,17 +319,21 @@ async function handleChatMessage(
     return;
   }
 
-  try {
-    await db.decrementTelegramMessageLimit(user.id, isBiz);
-    console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
-  } catch (err) {
-    console.error("[Telegram] Failed to decrement message limit:", {
-      chatId,
-      userId: user.id,
-      isBiz,
-      advisorSlug,
-      err,
-    });
+  if (isUnlimited) {
+    console.log("[Telegram] Unlimited plan — skip limit decrement", { chatId, isBiz });
+  } else {
+    try {
+      await db.decrementTelegramMessageLimit(user.id, isBiz);
+      console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
+    } catch (err) {
+      console.error("[Telegram] Failed to decrement message limit:", {
+        chatId,
+        userId: user.id,
+        isBiz,
+        advisorSlug,
+        err,
+      });
+    }
   }
 
   try {

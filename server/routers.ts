@@ -806,6 +806,8 @@ export const appRouter = router({
         .input(
           z.object({
             userId: z.number(),
+            bizPlanTier: z.enum(["starter", "unlimited"]).optional(),
+            founderPlanTier: z.enum(["starter", "unlimited"]).optional(),
             bizMessageLimit: z.number().int().min(0).optional(),
             founderMessageLimit: z.number().int().min(0).optional(),
             addBizMessages: z.number().int().min(0).optional(),
@@ -832,6 +834,8 @@ export const appRouter = router({
             }
             await db.updateTelegramUserPlan({
               userId: input.userId,
+              bizPlanTier: input.bizPlanTier,
+              founderPlanTier: input.founderPlanTier,
               bizMessageLimit: input.bizMessageLimit,
               founderMessageLimit: input.founderMessageLimit,
               addBizMessages: input.addBizMessages,
@@ -850,8 +854,7 @@ export const appRouter = router({
             name: z.string().min(1),
             email: z.string().email(),
             planType: z.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
-            bizMessageLimit: z.number().int().min(0).default(20),
-            founderMessageLimit: z.number().int().min(0).default(0),
+            planTier: z.enum(["starter", "unlimited"]).default("starter"),
             planExpiryDate: z.string().optional(),
             botUsername: z.string().min(1).optional(),
           }),
@@ -875,8 +878,7 @@ export const appRouter = router({
               email: input.email,
               name: input.name,
               planType: input.planType,
-              bizMessageLimit: input.bizMessageLimit,
-              founderMessageLimit: input.founderMessageLimit,
+              planTier: input.planTier,
               planExpiryDate,
               botUsername: input.botUsername,
             });

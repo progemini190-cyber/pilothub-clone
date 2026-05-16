@@ -20,6 +20,47 @@ var init_const = __esm({
   }
 });
 
+// shared/telegramPlans.ts
+function addTelegramPlanMonths(from = /* @__PURE__ */ new Date(), months = 1) {
+  const d = new Date(from);
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+function coerceTelegramLimit(value) {
+  if (value == null) return 0;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
+}
+function isUnlimitedTelegramLimit(limit) {
+  return coerceTelegramLimit(limit) > TELEGRAM_UNLIMITED_THRESHOLD;
+}
+function hasUsedTelegramStarter(flag) {
+  return flag === "true" || flag === true;
+}
+function isStarterTelegramLimit(limit) {
+  const n = coerceTelegramLimit(limit);
+  return n > 0 && n <= TELEGRAM_UNLIMITED_THRESHOLD;
+}
+function parseTelegramPlanTier(value) {
+  const v = (value ?? "").toLowerCase().trim();
+  if (v === "unlimited" || v === "unlimited_1_month" || v === "pro" || v === "unlimited (1 month)") {
+    return "unlimited";
+  }
+  return "starter";
+}
+var TELEGRAM_STARTER_MESSAGE_LIMIT, TELEGRAM_UNLIMITED_MESSAGE_LIMIT, TELEGRAM_UNLIMITED_THRESHOLD, TELEGRAM_STARTER_ALREADY_USED_BIZ, TELEGRAM_STARTER_ALREADY_USED_FOUNDER;
+var init_telegramPlans = __esm({
+  "shared/telegramPlans.ts"() {
+    "use strict";
+    TELEGRAM_STARTER_MESSAGE_LIMIT = 20;
+    TELEGRAM_UNLIMITED_MESSAGE_LIMIT = 999999;
+    TELEGRAM_UNLIMITED_THRESHOLD = 5e5;
+    TELEGRAM_STARTER_ALREADY_USED_BIZ = "\u1012\u102E\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u101E\u100A\u103A Starter Plan (\u1021\u1000\u103C\u1031\u102C\u1004\u103A\u1038 \u1042\u1040) \u101D\u101A\u103A\u101A\u1030\u1015\u103C\u102E\u1038\u101E\u102C\u1038\u1016\u103C\u1005\u103A\u104D Unlimited Plan \u101E\u102C \u101D\u101A\u103A\u101A\u1030\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1010\u1031\u102C\u1037\u1019\u100A\u103A\u104B";
+    TELEGRAM_STARTER_ALREADY_USED_FOUNDER = "\u1012\u102E\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u101E\u100A\u103A Founder Starter Plan (\u1021\u1000\u103C\u1031\u102C\u1004\u103A\u1038 \u1042\u1040) \u101D\u101A\u103A\u101A\u1030\u1015\u103C\u102E\u1038\u101E\u102C\u1038\u1016\u103C\u1005\u103A\u104D Unlimited Plan \u101E\u102C \u101D\u101A\u103A\u101A\u1030\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1010\u1031\u102C\u1037\u1019\u100A\u103A\u104B";
+  }
+});
+
 // server/_core/env.ts
 var ENV;
 var init_env = __esm({
@@ -1612,8 +1653,56 @@ function mapUserToTelegramRow(user) {
     founderMessageLimit: user.founderMessageLimit ?? 5,
     planTypeBiz: user.planTypeBiz ?? "free",
     planTypeFounder: user.planTypeFounder ?? "free",
-    planExpiryDate
+    planExpiryDate,
+    hasUsedBizStarter: hasUsedTelegramStarter(user.hasUsedBizStarter),
+    hasUsedFounderStarter: hasUsedTelegramStarter(user.hasUsedFounderStarter)
   };
+}
+function assertCanAssignTelegramStarter(user, advisor) {
+  if (advisor === "bizpilot") {
+    if (hasUsedTelegramStarter(user.hasUsedBizStarter)) {
+      throw new Error(TELEGRAM_STARTER_ALREADY_USED_BIZ);
+    }
+    return;
+  }
+  if (hasUsedTelegramStarter(user.hasUsedFounderStarter)) {
+    throw new Error(TELEGRAM_STARTER_ALREADY_USED_FOUNDER);
+  }
+}
+async function applyTelegramAdvisorPlan(userId, advisor, tier, planExpiryDate) {
+  const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+  await ensureTelegramSchema2();
+  const db = await assertDatabase();
+  const user = await getUserById(userId);
+  if (!user) throw new Error("User not found");
+  if (tier === "starter") {
+    assertCanAssignTelegramStarter(user, advisor);
+  }
+  const expiry = tier === "unlimited" ? planExpiryDate ?? addTelegramPlanMonths() : planExpiryDate ?? user.planExpiryDate ?? addTelegramPlanMonths();
+  const updateSet = {
+    updatedAt: /* @__PURE__ */ new Date(),
+    planExpiryDate: expiry
+  };
+  if (advisor === "bizpilot") {
+    if (tier === "starter") {
+      updateSet.bizMessageLimit = TELEGRAM_STARTER_MESSAGE_LIMIT;
+      updateSet.planTypeBiz = "starter";
+      updateSet.hasUsedBizStarter = "true";
+      updateSet.bizMessagesUsed = 0;
+    } else {
+      updateSet.bizMessageLimit = TELEGRAM_UNLIMITED_MESSAGE_LIMIT;
+      updateSet.planTypeBiz = "pro";
+    }
+  } else if (tier === "starter") {
+    updateSet.founderMessageLimit = TELEGRAM_STARTER_MESSAGE_LIMIT;
+    updateSet.planTypeFounder = "starter";
+    updateSet.hasUsedFounderStarter = "true";
+    updateSet.founderMessagesUsed = 0;
+  } else {
+    updateSet.founderMessageLimit = TELEGRAM_UNLIMITED_MESSAGE_LIMIT;
+    updateSet.planTypeFounder = "pro";
+  }
+  await db.update(users3).set(updateSet).where(eq(users3.id, userId));
 }
 async function updateTelegramUserPlan(input) {
   const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
@@ -1621,35 +1710,73 @@ async function updateTelegramUserPlan(input) {
   const db = await assertDatabase();
   const user = await getUserById(input.userId);
   if (!user) throw new Error("User not found");
+  if (input.bizPlanTier) {
+    await applyTelegramAdvisorPlan(
+      input.userId,
+      "bizpilot",
+      input.bizPlanTier,
+      input.planExpiryDate
+    );
+  }
+  if (input.founderPlanTier) {
+    await applyTelegramAdvisorPlan(
+      input.userId,
+      "founderpilot",
+      input.founderPlanTier,
+      input.planExpiryDate
+    );
+  }
+  const hasManualLimits = input.bizMessageLimit !== void 0 || input.addBizMessages !== void 0 || input.founderMessageLimit !== void 0 || input.addFounderMessages !== void 0;
+  if ((input.bizPlanTier || input.founderPlanTier) && !hasManualLimits) {
+    return;
+  }
+  let workingUser = await getUserById(input.userId);
+  if (!workingUser) throw new Error("User not found");
   const updateSet = { updatedAt: /* @__PURE__ */ new Date() };
   if (input.planExpiryDate !== void 0) {
     updateSet.planExpiryDate = input.planExpiryDate;
   }
-  let bizLimit = user.bizMessageLimit ?? 0;
+  let bizLimit = workingUser.bizMessageLimit ?? 0;
   if (input.bizMessageLimit !== void 0) {
+    if (isStarterTelegramLimit(input.bizMessageLimit)) {
+      assertCanAssignTelegramStarter(workingUser, "bizpilot");
+      updateSet.hasUsedBizStarter = "true";
+      updateSet.planTypeBiz = "starter";
+    } else if (isUnlimitedTelegramLimit(input.bizMessageLimit)) {
+      updateSet.planTypeBiz = "pro";
+    }
     bizLimit = input.bizMessageLimit;
   } else if (input.addBizMessages !== void 0) {
     bizLimit = bizLimit + input.addBizMessages;
   }
   if (input.bizMessageLimit !== void 0 || input.addBizMessages !== void 0) {
     updateSet.bizMessageLimit = Math.max(0, bizLimit);
-    if (bizLimit > 0 && (user.planTypeBiz ?? "free") === "free") {
+    if (bizLimit > 0 && (workingUser.planTypeBiz ?? "free") === "free" && !isUnlimitedTelegramLimit(bizLimit)) {
       updateSet.planTypeBiz = "starter";
     }
   }
-  let founderLimit = user.founderMessageLimit ?? 0;
+  let founderLimit = workingUser.founderMessageLimit ?? 0;
   if (input.founderMessageLimit !== void 0) {
+    if (isStarterTelegramLimit(input.founderMessageLimit)) {
+      assertCanAssignTelegramStarter(workingUser, "founderpilot");
+      updateSet.hasUsedFounderStarter = "true";
+      updateSet.planTypeFounder = "starter";
+    } else if (isUnlimitedTelegramLimit(input.founderMessageLimit)) {
+      updateSet.planTypeFounder = "pro";
+    }
     founderLimit = input.founderMessageLimit;
   } else if (input.addFounderMessages !== void 0) {
     founderLimit = founderLimit + input.addFounderMessages;
   }
   if (input.founderMessageLimit !== void 0 || input.addFounderMessages !== void 0) {
     updateSet.founderMessageLimit = Math.max(0, founderLimit);
-    if (founderLimit > 0 && (user.planTypeFounder ?? "free") === "free") {
+    if (founderLimit > 0 && (workingUser.planTypeFounder ?? "free") === "free" && !isUnlimitedTelegramLimit(founderLimit)) {
       updateSet.planTypeFounder = "starter";
     }
   }
-  await db.update(users3).set(updateSet).where(eq(users3.id, input.userId));
+  if (Object.keys(updateSet).length > 1) {
+    await db.update(users3).set(updateSet).where(eq(users3.id, input.userId));
+  }
 }
 async function decrementTelegramMessageLimit(userId, isBiz) {
   const db = await assertDatabase();
@@ -1671,6 +1798,8 @@ var MAX_TELEGRAM_LLM_TURNS, MAX_TELEGRAM_TURN_CHARS;
 var init_db = __esm({
   "server/db.ts"() {
     "use strict";
+    init_telegramPlans();
+    init_telegramPlans();
     init_env();
     init_adminAccess();
     init_userStatus();
@@ -2765,22 +2894,33 @@ async function handleChatMessage(chatId, userText, advisorSlug, advisorQuery, bo
     return;
   }
   const isBiz = advisorSlug === "bizpilot";
-  const currentLimit = coerceTelegramMessageLimit(
-    isBiz ? user.bizMessageLimit : user.founderMessageLimit
-  );
+  const rawLimit = isBiz ? user.bizMessageLimit : user.founderMessageLimit;
+  const isUnlimited = isUnlimitedTelegramLimit(rawLimit);
+  const currentLimit = coerceTelegramMessageLimit(rawLimit);
   const isExpired = !isTelegramPlanActive(user.planExpiryDate ?? null);
   console.log("Credit check:", {
     userId: user.id,
     advisorQuery,
     advisorSlug,
     isBiz,
+    isUnlimited,
     currentLimit,
     bizMessageLimit: user.bizMessageLimit,
     founderMessageLimit: user.founderMessageLimit,
     expiry: user.planExpiryDate,
     isExpired
   });
-  if (currentLimit <= 0 || isExpired) {
+  if (isUnlimited) {
+    if (isExpired) {
+      console.log("[Telegram] Unlimited plan expired \u2014 denying access", {
+        userId: user.id,
+        chatId,
+        isBiz
+      });
+      await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
+      return;
+    }
+  } else if (currentLimit <= 0 || isExpired) {
     console.log("[Telegram] Credit check failed \u2014 denying access", {
       userId: user.id,
       advisorQuery,
@@ -2827,17 +2967,21 @@ async function handleChatMessage(chatId, userText, advisorSlug, advisorQuery, bo
     });
     return;
   }
-  try {
-    await decrementTelegramMessageLimit(user.id, isBiz);
-    console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
-  } catch (err) {
-    console.error("[Telegram] Failed to decrement message limit:", {
-      chatId,
-      userId: user.id,
-      isBiz,
-      advisorSlug,
-      err
-    });
+  if (isUnlimited) {
+    console.log("[Telegram] Unlimited plan \u2014 skip limit decrement", { chatId, isBiz });
+  } else {
+    try {
+      await decrementTelegramMessageLimit(user.id, isBiz);
+      console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
+    } catch (err) {
+      console.error("[Telegram] Failed to decrement message limit:", {
+        chatId,
+        userId: user.id,
+        isBiz,
+        advisorSlug,
+        err
+      });
+    }
   }
   try {
     await appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
@@ -3025,6 +3169,7 @@ var init_telegram = __esm({
     init_ensureTelegramSchema();
     init_llmWithApiKey();
     init_telegramConfig();
+    init_telegramPlans();
     NO_ACCESS_MSG = "\u101C\u1030\u1000\u103C\u102E\u1038\u1019\u1004\u103A\u1038\u104F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1001\u103D\u1004\u1037\u103A \u1000\u102F\u1014\u103A\u1006\u102F\u1036\u1038\u101E\u103D\u102C\u1038\u1015\u102B\u1015\u103C\u102E\u104B \u1011\u1015\u103A\u1019\u1036\u101D\u101A\u103A\u101A\u1030\u101B\u1014\u103A ChatPilot \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
     NO_USER_FOUND_MSG = "\u1012\u102E Bot \u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1016\u102D\u102F\u1037 Website \u1019\u103E\u102C \u1021\u101B\u1004\u103A Register \u101C\u102F\u1015\u103A\u1015\u1031\u1038\u1015\u102B \u101E\u102D\u102F\u1037\u1019\u101F\u102F\u1010\u103A ChatPilot Agency \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
     LINK_SUCCESS_MSG = "\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u1001\u103B\u102D\u1010\u103A\u1006\u1000\u103A\u1019\u103E\u102F \u1021\u1031\u102C\u1004\u103A\u1019\u103C\u1004\u103A\u1015\u102B\u101E\u100A\u103A\u104B \u1005\u1010\u1004\u103A\u1019\u1031\u1038\u1019\u103C\u1014\u103A\u1038\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B";
@@ -3367,22 +3512,10 @@ import { TRPCError as TRPCError3 } from "@trpc/server";
 init_db();
 init_ensureTelegramSchema();
 init_telegram();
+init_telegramPlans();
 import { nanoid as nanoid2 } from "nanoid";
 function generateShadowOpenId() {
   return `shadow_${nanoid2(24)}`;
-}
-function defaultExpiryOneMonth() {
-  const d = /* @__PURE__ */ new Date();
-  d.setMonth(d.getMonth() + 1);
-  return d;
-}
-function resolveLimits(input) {
-  const biz = input.bizMessageLimit ?? (input.planType === "bizpilot" ? 20 : 0);
-  const founder = input.founderMessageLimit ?? (input.planType === "founderpilot" ? 20 : 0);
-  return {
-    bizMessageLimit: Math.max(0, biz),
-    founderMessageLimit: Math.max(0, founder)
-  };
 }
 async function quickCreateTelegramUser(input) {
   await ensureTelegramSchema();
@@ -3409,13 +3542,8 @@ async function quickCreateTelegramUser(input) {
   } else {
     await updateUserProfile(user.id, { name });
   }
-  const limits = resolveLimits(input);
-  await updateTelegramUserPlan({
-    userId: user.id,
-    bizMessageLimit: limits.bizMessageLimit,
-    founderMessageLimit: limits.founderMessageLimit,
-    planExpiryDate: input.planExpiryDate ?? defaultExpiryOneMonth()
-  });
+  const expiry = input.planTier === "unlimited" ? input.planExpiryDate ?? addTelegramPlanMonths() : input.planExpiryDate ?? addTelegramPlanMonths();
+  await applyTelegramAdvisorPlan(user.id, input.planType, input.planTier, expiry);
   await updateUserSubscription(user.id, input.planType, "active");
   const tokenResult = await generateTelegramActivationToken(
     user.id,
@@ -3428,6 +3556,7 @@ async function quickCreateTelegramUser(input) {
     email: user.email ?? email,
     name: user.name ?? name,
     planType: input.planType,
+    planTier: input.planTier,
     created,
     token: tokenResult.token,
     activationLink: tokenResult.activationLink
@@ -4322,6 +4451,8 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
       updatePlan: publicProcedure.input(
         z2.object({
           userId: z2.number(),
+          bizPlanTier: z2.enum(["starter", "unlimited"]).optional(),
+          founderPlanTier: z2.enum(["starter", "unlimited"]).optional(),
           bizMessageLimit: z2.number().int().min(0).optional(),
           founderMessageLimit: z2.number().int().min(0).optional(),
           addBizMessages: z2.number().int().min(0).optional(),
@@ -4345,6 +4476,8 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
           }
           await updateTelegramUserPlan({
             userId: input.userId,
+            bizPlanTier: input.bizPlanTier,
+            founderPlanTier: input.founderPlanTier,
             bizMessageLimit: input.bizMessageLimit,
             founderMessageLimit: input.founderMessageLimit,
             addBizMessages: input.addBizMessages,
@@ -4362,8 +4495,7 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
           name: z2.string().min(1),
           email: z2.string().email(),
           planType: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
-          bizMessageLimit: z2.number().int().min(0).default(20),
-          founderMessageLimit: z2.number().int().min(0).default(0),
+          planTier: z2.enum(["starter", "unlimited"]).default("starter"),
           planExpiryDate: z2.string().optional(),
           botUsername: z2.string().min(1).optional()
         })
@@ -4384,8 +4516,7 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
             email: input.email,
             name: input.name,
             planType: input.planType,
-            bizMessageLimit: input.bizMessageLimit,
-            founderMessageLimit: input.founderMessageLimit,
+            planTier: input.planTier,
             planExpiryDate,
             botUsername: input.botUsername
           });
@@ -4534,6 +4665,7 @@ async function createContext(opts) {
 init_db();
 import { nanoid as nanoid3 } from "nanoid";
 init_telegram();
+init_telegramPlans();
 init_telegram();
 init_telegramConfig();
 function getPublicApiKey() {
@@ -4825,8 +4957,7 @@ Ref: ${transactionRef ?? "N/A"}`
         email: body.email.trim(),
         name: body.name.trim(),
         planType: parsePlanType(body.planType),
-        bizMessageLimit: typeof body.bizMessageLimit === "number" ? body.bizMessageLimit : void 0,
-        founderMessageLimit: typeof body.founderMessageLimit === "number" ? body.founderMessageLimit : void 0,
+        planTier: parseTelegramPlanTier(body.planTier),
         planExpiryDate,
         botUsername: body.botUsername?.trim()
       });

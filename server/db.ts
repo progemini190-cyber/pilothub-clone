@@ -1,4 +1,17 @@
 import { eq, and, desc, asc, sql, inArray, or } from "drizzle-orm";
+import {
+  addTelegramPlanMonths,
+  hasUsedTelegramStarter,
+  isStarterTelegramLimit,
+  isUnlimitedTelegramLimit,
+  TELEGRAM_STARTER_ALREADY_USED_BIZ,
+  TELEGRAM_STARTER_ALREADY_USED_FOUNDER,
+  TELEGRAM_STARTER_MESSAGE_LIMIT,
+  TELEGRAM_UNLIMITED_MESSAGE_LIMIT,
+  type TelegramPlanTier,
+} from "@shared/telegramPlans";
+
+export { isUnlimitedTelegramLimit } from "@shared/telegramPlans";
 import type { InsertUser } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { shouldGrantAdminRole } from "./_core/adminAccess";
@@ -271,6 +284,7 @@ export async function activateTieredPlan(
       updateData.hasUsedBizStarter = "true";
     } else {
       updateData.bizMessageLimit = 999999; // pro = unlimited
+      updateData.planExpiryDate = end;
       updateData.subscriptionStart = now;
       updateData.subscriptionEnd = end;
     }
@@ -285,6 +299,7 @@ export async function activateTieredPlan(
       updateData.hasUsedFounderStarter = "true";
     } else {
       updateData.founderMessageLimit = 999999; // pro = unlimited
+      updateData.planExpiryDate = end;
       updateData.subscriptionStart = now;
       updateData.subscriptionEnd = end;
     }
@@ -1045,6 +1060,8 @@ export type TelegramAdminUserRow = {
   planTypeBiz: string;
   planTypeFounder: string;
   planExpiryDate: string | null;
+  hasUsedBizStarter: boolean;
+  hasUsedFounderStarter: boolean;
 };
 
 export async function listTelegramBotUsers(): Promise<TelegramAdminUserRow[]> {
@@ -1068,6 +1085,8 @@ export function mapUserToTelegramRow(user: {
   planTypeBiz?: string | null;
   planTypeFounder?: string | null;
   planExpiryDate?: Date | string | number | null;
+  hasUsedBizStarter?: string | null;
+  hasUsedFounderStarter?: string | null;
 }): TelegramAdminUserRow {
   let planExpiryDate: string | null = null;
   if (user.planExpiryDate != null) {
@@ -1086,11 +1105,85 @@ export function mapUserToTelegramRow(user: {
     planTypeBiz: user.planTypeBiz ?? "free",
     planTypeFounder: user.planTypeFounder ?? "free",
     planExpiryDate,
+    hasUsedBizStarter: hasUsedTelegramStarter(user.hasUsedBizStarter),
+    hasUsedFounderStarter: hasUsedTelegramStarter(user.hasUsedFounderStarter),
   };
+}
+
+function assertCanAssignTelegramStarter(
+  user: {
+    hasUsedBizStarter?: string | null;
+    hasUsedFounderStarter?: string | null;
+  },
+  advisor: AdvisorSlug,
+): void {
+  if (advisor === "bizpilot") {
+    if (hasUsedTelegramStarter(user.hasUsedBizStarter)) {
+      throw new Error(TELEGRAM_STARTER_ALREADY_USED_BIZ);
+    }
+    return;
+  }
+  if (hasUsedTelegramStarter(user.hasUsedFounderStarter)) {
+    throw new Error(TELEGRAM_STARTER_ALREADY_USED_FOUNDER);
+  }
+}
+
+/**
+ * Apply Starter (20 msgs, one-time) or Unlimited (999999, +1 month expiry) for one advisor.
+ */
+export async function applyTelegramAdvisorPlan(
+  userId: number,
+  advisor: AdvisorSlug,
+  tier: TelegramPlanTier,
+  planExpiryDate?: Date | null,
+): Promise<void> {
+  const { ensureTelegramSchema } = await import("./db/ensureTelegramSchema");
+  await ensureTelegramSchema();
+  const db = await assertDatabase();
+  const user = await getUserById(userId);
+  if (!user) throw new Error("User not found");
+
+  if (tier === "starter") {
+    assertCanAssignTelegramStarter(user, advisor);
+  }
+
+  const expiry =
+    tier === "unlimited"
+      ? planExpiryDate ?? addTelegramPlanMonths()
+      : planExpiryDate ?? user.planExpiryDate ?? addTelegramPlanMonths();
+
+  const updateSet: Record<string, unknown> = {
+    updatedAt: new Date(),
+    planExpiryDate: expiry,
+  };
+
+  if (advisor === "bizpilot") {
+    if (tier === "starter") {
+      updateSet.bizMessageLimit = TELEGRAM_STARTER_MESSAGE_LIMIT;
+      updateSet.planTypeBiz = "starter";
+      updateSet.hasUsedBizStarter = "true";
+      updateSet.bizMessagesUsed = 0;
+    } else {
+      updateSet.bizMessageLimit = TELEGRAM_UNLIMITED_MESSAGE_LIMIT;
+      updateSet.planTypeBiz = "pro";
+    }
+  } else if (tier === "starter") {
+    updateSet.founderMessageLimit = TELEGRAM_STARTER_MESSAGE_LIMIT;
+    updateSet.planTypeFounder = "starter";
+    updateSet.hasUsedFounderStarter = "true";
+    updateSet.founderMessagesUsed = 0;
+  } else {
+    updateSet.founderMessageLimit = TELEGRAM_UNLIMITED_MESSAGE_LIMIT;
+    updateSet.planTypeFounder = "pro";
+  }
+
+  await db.update(users).set(updateSet as Record<string, unknown>).where(eq(users.id, userId));
 }
 
 export async function updateTelegramUserPlan(input: {
   userId: number;
+  bizPlanTier?: TelegramPlanTier;
+  founderPlanTier?: TelegramPlanTier;
   bizMessageLimit?: number;
   founderMessageLimit?: number;
   addBizMessages?: number;
@@ -1103,39 +1196,94 @@ export async function updateTelegramUserPlan(input: {
   const user = await getUserById(input.userId);
   if (!user) throw new Error("User not found");
 
+  if (input.bizPlanTier) {
+    await applyTelegramAdvisorPlan(
+      input.userId,
+      "bizpilot",
+      input.bizPlanTier,
+      input.planExpiryDate,
+    );
+  }
+
+  if (input.founderPlanTier) {
+    await applyTelegramAdvisorPlan(
+      input.userId,
+      "founderpilot",
+      input.founderPlanTier,
+      input.planExpiryDate,
+    );
+  }
+
+  const hasManualLimits =
+    input.bizMessageLimit !== undefined ||
+    input.addBizMessages !== undefined ||
+    input.founderMessageLimit !== undefined ||
+    input.addFounderMessages !== undefined;
+
+  if ((input.bizPlanTier || input.founderPlanTier) && !hasManualLimits) {
+    return;
+  }
+
+  let workingUser = await getUserById(input.userId);
+  if (!workingUser) throw new Error("User not found");
+
   const updateSet: Record<string, unknown> = { updatedAt: new Date() };
 
   if (input.planExpiryDate !== undefined) {
     updateSet.planExpiryDate = input.planExpiryDate;
   }
 
-  let bizLimit = user.bizMessageLimit ?? 0;
+  let bizLimit = workingUser.bizMessageLimit ?? 0;
   if (input.bizMessageLimit !== undefined) {
+    if (isStarterTelegramLimit(input.bizMessageLimit)) {
+      assertCanAssignTelegramStarter(workingUser, "bizpilot");
+      updateSet.hasUsedBizStarter = "true";
+      updateSet.planTypeBiz = "starter";
+    } else if (isUnlimitedTelegramLimit(input.bizMessageLimit)) {
+      updateSet.planTypeBiz = "pro";
+    }
     bizLimit = input.bizMessageLimit;
   } else if (input.addBizMessages !== undefined) {
     bizLimit = bizLimit + input.addBizMessages;
   }
   if (input.bizMessageLimit !== undefined || input.addBizMessages !== undefined) {
     updateSet.bizMessageLimit = Math.max(0, bizLimit);
-    if (bizLimit > 0 && (user.planTypeBiz ?? "free") === "free") {
+    if (
+      bizLimit > 0 &&
+      (workingUser.planTypeBiz ?? "free") === "free" &&
+      !isUnlimitedTelegramLimit(bizLimit)
+    ) {
       updateSet.planTypeBiz = "starter";
     }
   }
 
-  let founderLimit = user.founderMessageLimit ?? 0;
+  let founderLimit = workingUser.founderMessageLimit ?? 0;
   if (input.founderMessageLimit !== undefined) {
+    if (isStarterTelegramLimit(input.founderMessageLimit)) {
+      assertCanAssignTelegramStarter(workingUser, "founderpilot");
+      updateSet.hasUsedFounderStarter = "true";
+      updateSet.planTypeFounder = "starter";
+    } else if (isUnlimitedTelegramLimit(input.founderMessageLimit)) {
+      updateSet.planTypeFounder = "pro";
+    }
     founderLimit = input.founderMessageLimit;
   } else if (input.addFounderMessages !== undefined) {
     founderLimit = founderLimit + input.addFounderMessages;
   }
   if (input.founderMessageLimit !== undefined || input.addFounderMessages !== undefined) {
     updateSet.founderMessageLimit = Math.max(0, founderLimit);
-    if (founderLimit > 0 && (user.planTypeFounder ?? "free") === "free") {
+    if (
+      founderLimit > 0 &&
+      (workingUser.planTypeFounder ?? "free") === "free" &&
+      !isUnlimitedTelegramLimit(founderLimit)
+    ) {
       updateSet.planTypeFounder = "starter";
     }
   }
 
-  await db.update(users).set(updateSet as Record<string, unknown>).where(eq(users.id, input.userId));
+  if (Object.keys(updateSet).length > 1) {
+    await db.update(users).set(updateSet as Record<string, unknown>).where(eq(users.id, input.userId));
+  }
 }
 
 /**

@@ -18,6 +18,7 @@ import { notifyOwner } from "./_core/notification";
 import { sendNewApplicationNotificationEmail } from "./emailHelper";
 import { generateTelegramActivationToken } from "./telegram";
 import { quickCreateTelegramUser, parsePlanType } from "./quickCreateUser";
+import { parseTelegramPlanTier } from "@shared/telegramPlans";
 import { getTelegramBizBotUsername } from "./telegram";
 import { isTelegramBotUsernameConfigured } from "@shared/telegramConfig";
 
@@ -289,7 +290,7 @@ export function registerPublicApiRoutes(app: Express) {
 
   // ── POST /api/external/create-user ──────────────────────────────────────────
   // AI sales agent: create or find user, set plan limits, return Telegram start link.
-  // Body: { email, name, planType, bizMessageLimit?, founderMessageLimit?, planExpiryDate?, botUsername? }
+  // Body: { email, name, planType, planTier?, planExpiryDate?, botUsername? }
   app.post("/api/external/create-user", async (req: Request, res: Response) => {
     if (!await requireApiKey(req, res)) return;
     try {
@@ -297,8 +298,7 @@ export function registerPublicApiRoutes(app: Express) {
         email?: string;
         name?: string;
         planType?: string;
-        bizMessageLimit?: number;
-        founderMessageLimit?: number;
+        planTier?: string;
         planExpiryDate?: string | null;
         botUsername?: string;
       };
@@ -330,12 +330,7 @@ export function registerPublicApiRoutes(app: Express) {
         email: body.email.trim(),
         name: body.name.trim(),
         planType: parsePlanType(body.planType),
-        bizMessageLimit:
-          typeof body.bizMessageLimit === "number" ? body.bizMessageLimit : undefined,
-        founderMessageLimit:
-          typeof body.founderMessageLimit === "number"
-            ? body.founderMessageLimit
-            : undefined,
+        planTier: parseTelegramPlanTier(body.planTier),
         planExpiryDate,
         botUsername: body.botUsername?.trim(),
       });
