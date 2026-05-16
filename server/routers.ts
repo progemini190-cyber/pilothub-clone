@@ -748,6 +748,9 @@ export const appRouter = router({
           bizBotUsername,
           founderBotUsername,
           bizBotUsernameConfigured: isTelegramBotUsernameConfigured(bizBotUsername),
+          founderBotUsernameConfigured: founderBotUsername
+            ? isTelegramBotUsernameConfigured(founderBotUsername)
+            : false,
         };
       }),
       list: publicProcedure.query(async ({ ctx }) => {
@@ -868,6 +871,7 @@ export const appRouter = router({
           z.object({
             userId: z.number(),
             botUsername: z.string().min(1).optional(),
+            planType: z.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
           }),
         )
         .mutation(async ({ ctx, input }) => {
@@ -876,6 +880,7 @@ export const appRouter = router({
             return await generateTelegramActivationToken(
               input.userId,
               input.botUsername,
+              input.planType,
             );
           } catch (err) {
             const message = err instanceof Error ? err.message : "Failed to generate token";
@@ -888,12 +893,17 @@ export const appRouter = router({
           z.object({
             userId: z.number(),
             botUsername: z.string().min(1).optional(),
+            planType: z.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
           }),
         )
         .mutation(async ({ ctx, input }) => {
           await requireAdmin(ctx);
           try {
-            return await generateTelegramActivationToken(input.userId, input.botUsername);
+            return await generateTelegramActivationToken(
+              input.userId,
+              input.botUsername,
+              input.planType,
+            );
           } catch (err) {
             const message = err instanceof Error ? err.message : "Failed to generate link";
             throw new TRPCError({ code: "BAD_REQUEST", message });

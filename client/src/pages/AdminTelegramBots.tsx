@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   buildActivationLink,
   getTelegramBizBotUsername,
+  getTelegramFounderBotUsername,
   isTelegramBotUsernameConfigured,
 } from "@/lib/telegramConfig";
 
@@ -47,6 +48,17 @@ function toDateInputValue(value: Date | string | null | undefined) {
   return d.toISOString().slice(0, 10);
 }
 
+/** Pick bot for activation link from user plan columns and message limits. */
+function inferActivationPlanType(u: TelegramUser): "bizpilot" | "founderpilot" {
+  const founderActive =
+    u.planTypeFounder !== "free" || u.founderMessageLimit > 0;
+  const bizActive = u.planTypeBiz !== "free" || u.bizMessageLimit > 0;
+  if (founderActive && !bizActive) return "founderpilot";
+  if (bizActive && !founderActive) return "bizpilot";
+  if (u.founderMessageLimit > u.bizMessageLimit) return "founderpilot";
+  return "bizpilot";
+}
+
 export default function AdminTelegramBots() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
@@ -75,7 +87,15 @@ export default function AdminTelegramBots() {
       ? telegramSettings.bizBotUsername
       : getTelegramBizBotUsername();
 
+  const founderBotUsername =
+    telegramSettings?.founderBotUsername ??
+    getTelegramFounderBotUsername() ??
+    null;
+
   const botUsernameReady = isTelegramBotUsernameConfigured(bizBotUsername);
+  const founderBotUsernameReady =
+    telegramSettings?.founderBotUsernameConfigured ??
+    (founderBotUsername ? isTelegramBotUsernameConfigured(founderBotUsername) : false);
 
   const {
     data,
@@ -145,7 +165,9 @@ export default function AdminTelegramBots() {
     onSuccess: (result, variables) => {
       const user = users.find((u) => u.id === variables.userId);
       if (!user) return;
-      const link = result.activationLink || buildActivationLink(result.token);
+      const planType = inferActivationPlanType(user);
+      const link =
+        result.activationLink || buildActivationLink(result.token, undefined, planType);
       setLinkModal({ user, link, token: result.token });
       toast.success("Activation token created");
     },
@@ -298,19 +320,25 @@ export default function AdminTelegramBots() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <p className="text-sm flex-1" style={{ color: "oklch(55% 0.03 220)" }}>
-            Manage Telegram users, limits, and expiry. Activation links use bot{" "}
+            Manage Telegram users, limits, and expiry. BizPilot:{" "}
             <code className="text-xs px-1.5 py-0.5 rounded" style={{ background: "oklch(22% 0.05 220)", color: botUsernameReady ? "oklch(72% 0.18 162)" : "oklch(75% 0.18 25)" }}>
               @{bizBotUsername}
             </code>
             {botUsernameReady ? (
-              <> from <code className="text-xs">NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</code>.</>
+              <> (<code className="text-xs">NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</code>)</>
             ) : (
-              <>
-                {" "}
-                — set <code className="text-xs">NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</code> in .env / Vercel and redeploy.
-              </>
-            )}{" "}
-            Also set <code>TELEGRAM_BIZPILOT_TOKEN</code> and <code>PUBLIC_APP_URL</code> for Setup Bot.
+              <> — set <code className="text-xs">NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</code></>
+            )}
+            . FounderPilot:{" "}
+            <code className="text-xs px-1.5 py-0.5 rounded" style={{ background: "oklch(22% 0.05 220)", color: founderBotUsernameReady ? "oklch(78% 0.12 75)" : "oklch(75% 0.18 25)" }}>
+              @{founderBotUsername ?? "—"}
+            </code>
+            {founderBotUsernameReady ? (
+              <> (<code className="text-xs">NEXT_PUBLIC_TELEGRAM_FOUNDERPILOT_USERNAME</code>)</>
+            ) : (
+              <> — set <code className="text-xs">NEXT_PUBLIC_TELEGRAM_FOUNDERPILOT_USERNAME</code></>
+            )}
+            . Tokens: <code>TELEGRAM_BIZPILOT_TOKEN</code>, <code>TELEGRAM_FOUNDERPILOT_TOKEN</code>, <code>PUBLIC_APP_URL</code>.
           </p>
           <div className="flex flex-wrap gap-2 shrink-0">
             <button
@@ -350,7 +378,21 @@ export default function AdminTelegramBots() {
               }}
             >
               <Webhook className="w-4 h-4" />
-              {setupWebhook.isPending ? "Setting up…" : "Setup Bot"}
+              {setupWebhook.isPending ? "Setting up…" : "Setup BizPilot"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setupWebhook.mutate({ advisor: "founderpilot" })}
+              disabled={setupWebhook.isPending}
+              className="px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+              style={{
+                background: "oklch(78% 0.12 75 / 0.12)",
+                color: "oklch(78% 0.12 75)",
+                border: "1px solid oklch(78% 0.12 75 / 0.3)",
+              }}
+            >
+              <Webhook className="w-4 h-4" />
+              {setupWebhook.isPending ? "Setting up…" : "Setup FounderPilot"}
             </button>
           </div>
         </div>
@@ -499,6 +541,7 @@ export default function AdminTelegramBots() {
                               onClick={() =>
                                 createToken.mutate({
                                   userId: u.id,
+                                  planType: inferActivationPlanType(u),
                                 })
                               }
                               disabled={createToken.isPending}

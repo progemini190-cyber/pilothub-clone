@@ -13,6 +13,7 @@ import { ensureTelegramSchema } from "./db/ensureTelegramSchema";
 import { invokeAdvisorLLM } from "./llmWithApiKey";
 import {
   buildTelegramStartLink,
+  resolveTelegramActivationBotUsername,
   resolveTelegramBizBotUsername,
   resolveTelegramFounderBotUsername,
   TELEGRAM_BOT_USERNAME_PLACEHOLDER,
@@ -65,22 +66,26 @@ type TelegramUpdate = {
   };
 };
 
-export function getTelegramBotToken(advisor: AdvisorSlug): string | undefined {
-  if (advisor === "bizpilot") {
+/** True when webhook `advisor` query targets FounderPilot. */
+export function isFounderAdvisorQuery(advisorQuery: string | undefined): boolean {
+  return (advisorQuery ?? "").toLowerCase().includes("founder");
+}
+
+export function getTelegramBotToken(advisor: AdvisorSlug | string | undefined): string | undefined {
+  if (isFounderAdvisorQuery(advisor)) {
     return (
-      process.env.TELEGRAM_BIZPILOT_TOKEN?.trim() ||
-      process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim()
+      process.env.TELEGRAM_FOUNDERPILOT_TOKEN?.trim() ||
+      process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim()
     );
   }
   return (
-    process.env.TELEGRAM_FOUNDERPILOT_TOKEN?.trim() ||
-    process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim()
+    process.env.TELEGRAM_BIZPILOT_TOKEN?.trim() ||
+    process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim()
   );
 }
 
 function normalizeAdvisorSlug(raw: string | undefined): AdvisorSlug {
-  const r = raw?.toLowerCase().trim();
-  if (r === "founderpilot") return "founderpilot";
+  if (isFounderAdvisorQuery(raw)) return "founderpilot";
   return "bizpilot";
 }
 
@@ -109,6 +114,19 @@ function extractAdvisorQuery(req: Request): string | undefined {
 
 function parseAdvisor(req: Request): AdvisorSlug {
   return normalizeAdvisorSlug(extractAdvisorQuery(req));
+}
+
+export type TelegramActivationPlanType = "bizpilot" | "founderpilot";
+
+export function resolveActivationBotUsername(
+  planType?: TelegramActivationPlanType | string | null,
+  botUsernameOverride?: string,
+): string {
+  return resolveTelegramActivationBotUsername(
+    process.env,
+    planType,
+    botUsernameOverride,
+  );
 }
 
 function parseStartToken(text: string): string | null {
@@ -417,9 +435,12 @@ export function getTelegramFounderBotUsername(): string | null {
   return resolveTelegramFounderBotUsername(process.env);
 }
 
-export function buildTelegramActivationLink(token: string, botUsername?: string): string {
-  const username =
-    botUsername?.trim().replace(/^@/, "") || getTelegramBizBotUsername();
+export function buildTelegramActivationLink(
+  token: string,
+  botUsername?: string,
+  planType?: TelegramActivationPlanType | string,
+): string {
+  const username = resolveActivationBotUsername(planType, botUsername);
   return buildTelegramStartLink(token, username);
 }
 
@@ -503,6 +524,7 @@ export async function setupTelegramWebhook(
 export async function generateTelegramActivationToken(
   userId: number,
   botUsername?: string,
+  planType: TelegramActivationPlanType = "bizpilot",
 ): Promise<{
   token: string;
   userId: number;
@@ -513,15 +535,16 @@ export async function generateTelegramActivationToken(
   await ensureTelegramSchema();
   const token = nanoid(32);
   const row = await db.createBotActivationToken(userId, token);
-  const username =
-    botUsername?.trim().replace(/^@/, "") || getTelegramBizBotUsername();
-  const activationLink = buildTelegramActivationLink(token, username);
+  const activationLink = buildTelegramActivationLink(token, botUsername, planType);
   const founderBot = getTelegramFounderBotUsername();
+  const bizBot = getTelegramBizBotUsername();
   return {
     token: row.token,
     userId: row.userId,
     activationLink,
-    deepLinkBiz: activationLink,
-    deepLinkFounder: founderBot ? buildTelegramActivationLink(token, founderBot) : null,
+    deepLinkBiz: buildTelegramActivationLink(token, bizBot, "bizpilot"),
+    deepLinkFounder: founderBot
+      ? buildTelegramActivationLink(token, founderBot, "founderpilot")
+      : null,
   };
 }

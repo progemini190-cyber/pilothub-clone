@@ -104,6 +104,7 @@ export async function quickCreateTelegramUser(
   const tokenResult = await generateTelegramActivationToken(
     user.id,
     input.botUsername,
+    input.planType,
   );
 
   return {

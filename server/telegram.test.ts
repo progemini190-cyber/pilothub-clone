@@ -5,7 +5,16 @@ import {
   resolveTelegramBizBotUsername,
   TELEGRAM_BOT_USERNAME_PLACEHOLDER,
 } from "@shared/telegramConfig";
-import { buildTelegramActivationLink, getTelegramBizBotUsername } from "./telegram";
+import {
+  buildTelegramActivationLink,
+  getTelegramBizBotUsername,
+  getTelegramBotToken,
+  isFounderAdvisorQuery,
+} from "./telegram";
+import {
+  resolveTelegramActivationBotUsername,
+  resolveTelegramFounderBotUsername,
+} from "@shared/telegramConfig";
 
 describe("hasTelegramCredits", () => {
   it("allows when limit > 0 regardless of website planType", () => {
@@ -110,5 +119,39 @@ describe("telegram bot username env", () => {
 
   it("falls back to placeholder when unset", () => {
     expect(getTelegramBizBotUsername()).toBe(TELEGRAM_BOT_USERNAME_PLACEHOLDER);
+  });
+
+  it("uses NEXT_PUBLIC_TELEGRAM_FOUNDERPILOT_USERNAME for founder activation links", () => {
+    process.env.NEXT_PUBLIC_TELEGRAM_FOUNDERPILOT_USERNAME = "@FounderPilotBot";
+    expect(resolveTelegramFounderBotUsername(process.env)).toBe("FounderPilotBot");
+    expect(
+      buildTelegramActivationLink("tok456", undefined, "founderpilot"),
+    ).toBe("https://t.me/FounderPilotBot?start=tok456");
+    expect(
+      resolveTelegramActivationBotUsername(process.env, "founderpilot"),
+    ).toBe("FounderPilotBot");
+  });
+});
+
+describe("telegram webhook token routing", () => {
+  const prev = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...prev };
+  });
+
+  beforeEach(() => {
+    process.env.TELEGRAM_BIZPILOT_TOKEN = "biz-token";
+    process.env.TELEGRAM_FOUNDERPILOT_TOKEN = "founder-token";
+    delete process.env.TELEGRAM_BIZ_BOT_TOKEN;
+    delete process.env.TELEGRAM_FOUNDER_BOT_TOKEN;
+  });
+
+  it("routes founder advisor query to TELEGRAM_FOUNDERPILOT_TOKEN", () => {
+    expect(isFounderAdvisorQuery("founderpilot")).toBe(true);
+    expect(isFounderAdvisorQuery("founder")).toBe(true);
+    expect(getTelegramBotToken("founderpilot")).toBe("founder-token");
+    expect(getTelegramBotToken("bizpilot")).toBe("biz-token");
+    expect(getTelegramBotToken(undefined)).toBe("biz-token");
   });
 });
