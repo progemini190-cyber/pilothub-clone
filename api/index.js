@@ -899,7 +899,7 @@ var init_connection = __esm({
 });
 
 // server/db.ts
-import { eq, and, desc, asc, sql as sql3, inArray } from "drizzle-orm";
+import { eq, and, desc, asc, sql as sql3, inArray, or } from "drizzle-orm";
 async function assertDatabase() {
   const database = await getDb();
   if (!database) {
@@ -1252,6 +1252,26 @@ async function setApiKeyActive(keyId, provider) {
 async function listAllUsers() {
   const db = await assertDatabase();
   return db.select().from(users3).orderBy(desc(users3.createdAt));
+}
+async function listApprovedUserEmails() {
+  const db = await assertDatabase();
+  const rows = await db.select({
+    id: users3.id,
+    email: users3.email,
+    name: users3.name,
+    status: users3.status
+  }).from(users3).where(
+    or(
+      eq(users3.status, "approved"),
+      eq(users3.status, "active"),
+      eq(users3.status, "APPROVED")
+    )
+  ).orderBy(desc(users3.createdAt));
+  return rows.filter((r) => typeof r.email === "string" && r.email.trim().length > 0).map((r) => ({
+    id: r.id,
+    email: r.email.trim(),
+    name: r.name
+  }));
 }
 async function updateUserRole(userId, role) {
   const db = await getDb();
@@ -1631,17 +1651,20 @@ async function updateTelegramUserPlan(input) {
   }
   await db.update(users3).set(updateSet).where(eq(users3.id, input.userId));
 }
-async function decrementTelegramMessageLimit(userId, advisor) {
-  const db = await getDb();
-  if (!db) return;
-  const user = await getUserById(userId);
-  if (!user) return;
-  if (advisor === "bizpilot") {
-    const newLimit = Math.max(0, (user.bizMessageLimit ?? 0) - 1);
-    await db.update(users3).set({ bizMessageLimit: newLimit }).where(eq(users3.id, userId));
+async function decrementTelegramMessageLimit(userId, isBiz) {
+  const db = await assertDatabase();
+  if (isBiz) {
+    await db.update(users3).set({
+      bizMessageLimit: sql3`max(0, ${users3.bizMessageLimit} - 1)`,
+      bizMessagesUsed: sql3`${users3.bizMessagesUsed} + 1`,
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(users3.id, userId));
   } else {
-    const newLimit = Math.max(0, (user.founderMessageLimit ?? 0) - 1);
-    await db.update(users3).set({ founderMessageLimit: newLimit }).where(eq(users3.id, userId));
+    await db.update(users3).set({
+      founderMessageLimit: sql3`max(0, ${users3.founderMessageLimit} - 1)`,
+      founderMessagesUsed: sql3`${users3.founderMessagesUsed} + 1`,
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(users3.id, userId));
   }
 }
 var MAX_TELEGRAM_LLM_TURNS, MAX_TELEGRAM_TURN_CHARS;
@@ -2567,8 +2590,10 @@ var telegramConfig_exports = {};
 __export(telegramConfig_exports, {
   TELEGRAM_BOT_USERNAME_PLACEHOLDER: () => TELEGRAM_BOT_USERNAME_PLACEHOLDER,
   buildTelegramStartLink: () => buildTelegramStartLink,
+  isFounderTelegramPlan: () => isFounderTelegramPlan,
   isTelegramBotUsernameConfigured: () => isTelegramBotUsernameConfigured,
   normalizeTelegramBotUsername: () => normalizeTelegramBotUsername,
+  resolveTelegramActivationBotUsername: () => resolveTelegramActivationBotUsername,
   resolveTelegramBizBotUsername: () => resolveTelegramBizBotUsername,
   resolveTelegramFounderBotUsername: () => resolveTelegramFounderBotUsername
 });
@@ -2580,8 +2605,20 @@ function resolveTelegramBizBotUsername(env) {
   return username || TELEGRAM_BOT_USERNAME_PLACEHOLDER;
 }
 function resolveTelegramFounderBotUsername(env) {
-  const username = normalizeTelegramBotUsername(env.NEXT_PUBLIC_TELEGRAM_FOUNDER_BOT_USERNAME) || normalizeTelegramBotUsername(env.VITE_TELEGRAM_FOUNDER_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_FOUNDERPILOT_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_FOUNDER_BOT_USERNAME) || "";
+  const username = normalizeTelegramBotUsername(env.NEXT_PUBLIC_TELEGRAM_FOUNDERPILOT_USERNAME) || normalizeTelegramBotUsername(env.NEXT_PUBLIC_TELEGRAM_FOUNDER_BOT_USERNAME) || normalizeTelegramBotUsername(env.VITE_TELEGRAM_FOUNDERPILOT_USERNAME) || normalizeTelegramBotUsername(env.VITE_TELEGRAM_FOUNDER_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_FOUNDERPILOT_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_FOUNDER_BOT_USERNAME) || "";
   return username || null;
+}
+function isFounderTelegramPlan(planType) {
+  return (planType ?? "").toLowerCase().includes("founder");
+}
+function resolveTelegramActivationBotUsername(env, planType, botUsernameOverride) {
+  const override = normalizeTelegramBotUsername(botUsernameOverride);
+  if (override) return override;
+  if (isFounderTelegramPlan(planType)) {
+    const founder = resolveTelegramFounderBotUsername(env);
+    if (founder) return founder;
+  }
+  return resolveTelegramBizBotUsername(env);
 }
 function isTelegramBotUsernameConfigured(username) {
   return Boolean(username) && username !== TELEGRAM_BOT_USERNAME_PLACEHOLDER;
@@ -2607,20 +2644,24 @@ __export(telegram_exports, {
   getTelegramBizBotUsername: () => getTelegramBizBotUsername,
   getTelegramBotToken: () => getTelegramBotToken,
   getTelegramFounderBotUsername: () => getTelegramFounderBotUsername,
+  isFounderAdvisorQuery: () => isFounderAdvisorQuery,
   registerTelegramRoutes: () => registerTelegramRoutes,
+  resolveActivationBotUsername: () => resolveActivationBotUsername,
   resolveWebhookBaseUrl: () => resolveWebhookBaseUrl,
   setupTelegramWebhook: () => setupTelegramWebhook
 });
 import { nanoid } from "nanoid";
+function isFounderAdvisorQuery(advisorQuery) {
+  return (advisorQuery ?? "").toLowerCase().includes("founder");
+}
 function getTelegramBotToken(advisor) {
-  if (advisor === "bizpilot") {
-    return process.env.TELEGRAM_BIZPILOT_TOKEN?.trim() || process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim();
+  if (isFounderAdvisorQuery(advisor)) {
+    return process.env.TELEGRAM_FOUNDERPILOT_TOKEN?.trim() || process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim();
   }
-  return process.env.TELEGRAM_FOUNDERPILOT_TOKEN?.trim() || process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim();
+  return process.env.TELEGRAM_BIZPILOT_TOKEN?.trim() || process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim();
 }
 function normalizeAdvisorSlug(raw) {
-  const r = raw?.toLowerCase().trim();
-  if (r === "founderpilot") return "founderpilot";
+  if (isFounderAdvisorQuery(raw)) return "founderpilot";
   return "bizpilot";
 }
 function extractAdvisorQuery(req) {
@@ -2641,6 +2682,13 @@ function extractAdvisorQuery(req) {
 }
 function parseAdvisor(req) {
   return normalizeAdvisorSlug(extractAdvisorQuery(req));
+}
+function resolveActivationBotUsername(planType, botUsernameOverride) {
+  return resolveTelegramActivationBotUsername(
+    process.env,
+    planType,
+    botUsernameOverride
+  );
 }
 function parseStartToken(text3) {
   const trimmed = text3.trim();
@@ -2779,13 +2827,23 @@ async function handleChatMessage(chatId, userText, advisorSlug, advisorQuery, bo
     });
     return;
   }
-  await appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
-  await decrementTelegramMessageLimit(user.id, advisorSlug);
-  console.log("[Telegram] Message limit decremented after successful delivery", {
-    userId: user.id,
-    advisorSlug,
-    isBiz
-  });
+  try {
+    await decrementTelegramMessageLimit(user.id, isBiz);
+    console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
+  } catch (err) {
+    console.error("[Telegram] Failed to decrement message limit:", {
+      chatId,
+      userId: user.id,
+      isBiz,
+      advisorSlug,
+      err
+    });
+  }
+  try {
+    await appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+  } catch (err) {
+    console.error("[Telegram] appendTelegramLlmTurnPair failed (reply already sent):", err);
+  }
 }
 async function safeGetUserByTelegramChatId(chatId) {
   try {
@@ -2883,8 +2941,8 @@ function getTelegramBizBotUsername() {
 function getTelegramFounderBotUsername() {
   return resolveTelegramFounderBotUsername(process.env);
 }
-function buildTelegramActivationLink(token, botUsername) {
-  const username = botUsername?.trim().replace(/^@/, "") || getTelegramBizBotUsername();
+function buildTelegramActivationLink(token, botUsername, planType) {
+  const username = resolveActivationBotUsername(planType, botUsername);
   return buildTelegramStartLink(token, username);
 }
 function resolveWebhookBaseUrl(req) {
@@ -2943,19 +3001,19 @@ async function setupTelegramWebhook(advisor, baseUrl) {
   console.info("[Telegram] Webhook registered", { advisor, webhookUrl });
   return { ok: true, webhookUrl, description: data.description };
 }
-async function generateTelegramActivationToken(userId, botUsername) {
+async function generateTelegramActivationToken(userId, botUsername, planType = "bizpilot") {
   await ensureTelegramSchema();
   const token = nanoid(32);
   const row = await createBotActivationToken(userId, token);
-  const username = botUsername?.trim().replace(/^@/, "") || getTelegramBizBotUsername();
-  const activationLink = buildTelegramActivationLink(token, username);
+  const activationLink = buildTelegramActivationLink(token, botUsername, planType);
   const founderBot = getTelegramFounderBotUsername();
+  const bizBot = getTelegramBizBotUsername();
   return {
     token: row.token,
     userId: row.userId,
     activationLink,
-    deepLinkBiz: activationLink,
-    deepLinkFounder: founderBot ? buildTelegramActivationLink(token, founderBot) : null
+    deepLinkBiz: buildTelegramActivationLink(token, bizBot, "bizpilot"),
+    deepLinkFounder: founderBot ? buildTelegramActivationLink(token, founderBot, "founderpilot") : null
   };
 }
 var NO_ACCESS_MSG, NO_USER_FOUND_MSG, LINK_SUCCESS_MSG, INVALID_TOKEN_MSG, SYSTEM_ERROR_MSG, ALREADY_LINKED_MSG, CONTACT_TEAM_BUTTON_TEXT, CONTACT_TEAM_REPLY_MSG, PERSISTENT_REPLY_KEYBOARD;
@@ -3361,7 +3419,8 @@ async function quickCreateTelegramUser(input) {
   await updateUserSubscription(user.id, input.planType, "active");
   const tokenResult = await generateTelegramActivationToken(
     user.id,
-    input.botUsername
+    input.botUsername,
+    input.planType
   );
   return {
     userId: user.id,
@@ -3387,13 +3446,50 @@ init_storage();
 
 // server/emailHelper.ts
 import nodemailer from "nodemailer";
+var PILOTHUB_ADMIN_NOTIFICATION_EMAIL = "chatpilot.mm@gmail.com";
+var PILOTHUB_LOGO_URL = "https://www.pilothub.vip/pilothub-logo.png";
+function getSmtpUser() {
+  return process.env.GMAIL_USER?.trim();
+}
+function getPilotHubEmailFrom() {
+  const smtpUser = getSmtpUser();
+  const noreply = process.env.PILOTHUB_NOREPLY_EMAIL?.trim() || "noreply@pilothub.vip";
+  const fromAddress = noreply.includes("@") ? noreply : smtpUser ?? noreply;
+  return `"PilotHub Team" <${fromAddress}>`;
+}
+function wrapPilotHubEmailHtml(bodyHtml) {
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: 'Segoe UI', Arial, sans-serif; background: #0a1628; color: #e2e8f0; margin: 0; padding: 0;">
+  <div style="max-width: 600px; margin: 40px auto; background: #0f1f35; border-radius: 16px; overflow: hidden; border: 1px solid #1e3a5f;">
+    <div style="padding: 32px 40px 24px; text-align: center; border-bottom: 1px solid #1e3a5f; background: linear-gradient(135deg, #0f2a1e 0%, #0a1628 100%);">
+      <img src="${PILOTHUB_LOGO_URL}" alt="PilotHub Logo" style="height: 50px; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;" />
+      <p style="color: #64748b; font-size: 13px; margin: 0;">by ChatPilot</p>
+    </div>
+    <div style="padding: 32px 40px;">
+      ${bodyHtml}
+    </div>
+    <div style="padding: 20px 40px; border-top: 1px solid #1e3a5f; text-align: center;">
+      <p style="color: #334155; font-size: 12px; margin: 0;">Powered by ChatPilot \xB7 Myanmar Business AI Platform</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+function escapeHtml(text3) {
+  return text3.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function textToEmailHtml(text3) {
+  return escapeHtml(text3).replace(/\r?\n/g, "<br />");
+}
 async function sendEmail({
   to,
   subject,
   html,
   text: text3
 }) {
-  const user = process.env.GMAIL_USER;
+  const user = getSmtpUser();
   const pass = process.env.GMAIL_APP_PASSWORD;
   if (!user || !pass) {
     console.warn("[Email] GMAIL_USER or GMAIL_APP_PASSWORD not set. Email not sent.");
@@ -3405,7 +3501,7 @@ async function sendEmail({
       auth: { user, pass }
     });
     await transporter.sendMail({
-      from: `"PilotHub" <${user}>`,
+      from: getPilotHubEmailFrom(),
       to,
       subject,
       text: text3,
@@ -3418,6 +3514,60 @@ async function sendEmail({
     return false;
   }
 }
+async function sendNewApplicationNotificationEmail(app2) {
+  const rows = [
+    ["Name", app2.fullName],
+    ["Email", app2.email],
+    ["Phone", app2.phone ?? "\u2014"],
+    ["Business", app2.businessName ?? "\u2014"],
+    ["Business Type", app2.businessType ?? "\u2014"],
+    ["Use Case", app2.useCase ?? "\u2014"],
+    ["Plan", app2.plan ?? "free"],
+    ["Source", app2.source ?? "website"],
+    ...app2.applicationId != null ? [["Application ID", String(app2.applicationId)]] : []
+  ];
+  const tableRows = rows.map(
+    ([label, value]) => `<tr>
+          <td style="padding: 8px 12px; color: #64748b; font-size: 13px; vertical-align: top; width: 140px;">${escapeHtml(label)}</td>
+          <td style="padding: 8px 12px; color: #f1f5f9; font-size: 14px;">${escapeHtml(value)}</td>
+        </tr>`
+  ).join("");
+  const bodyHtml = `
+    <h2 style="color: #f1f5f9; font-size: 20px; margin: 0 0 20px;">New application received</h2>
+    <table style="width: 100%; border-collapse: collapse; background: #0a1628; border-radius: 12px; border: 1px solid #1e3a5f;">
+      ${tableRows}
+    </table>
+    <p style="color: #475569; font-size: 13px; margin: 24px 0 0;">
+      Review in the <a href="https://www.pilothub.vip/admin/applications" style="color: #22c55e;">Admin Applications</a> panel.
+    </p>
+  `;
+  const plain = rows.map(([k, v]) => `${k}: ${v}`).join("\n");
+  return sendEmail({
+    to: PILOTHUB_ADMIN_NOTIFICATION_EMAIL,
+    subject: "New PilotHub Application Received!",
+    html: wrapPilotHubEmailHtml(bodyHtml),
+    text: `New PilotHub Application Received!
+
+${plain}`
+  });
+}
+async function sendBroadcastEmail({
+  to,
+  subject,
+  message
+}) {
+  const bodyHtml = `
+    <div style="color: #94a3b8; line-height: 1.7; font-size: 15px;">
+      ${textToEmailHtml(message)}
+    </div>
+  `;
+  return sendEmail({
+    to,
+    subject,
+    html: wrapPilotHubEmailHtml(bodyHtml),
+    text: message
+  });
+}
 async function sendApprovalEmail({
   to,
   name,
@@ -3425,61 +3575,37 @@ async function sendApprovalEmail({
   loginUrl
 }) {
   const planName = plan === "bizpilot" ? "BizPilot" : plan === "founderpilot" ? "FounderPilot" : "Free Trial";
-  const html = `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: 'Segoe UI', Arial, sans-serif; background: #0a1628; color: #e2e8f0; margin: 0; padding: 0;">
-  <div style="max-width: 600px; margin: 40px auto; background: #0f1f35; border-radius: 16px; overflow: hidden; border: 1px solid #1e3a5f;">
-    <!-- Header -->
-    <div style="background: linear-gradient(135deg, #0f2a1e 0%, #0a1628 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid #1e3a5f;">
-      <h1 style="color: #22c55e; font-size: 28px; font-weight: 800; margin: 0; letter-spacing: -0.5px;">PILOTHUB</h1>
-      <p style="color: #64748b; font-size: 13px; margin: 4px 0 0;">by ChatPilot</p>
-    </div>
-    <!-- Body -->
-    <div style="padding: 40px;">
-      <h2 style="color: #f1f5f9; font-size: 22px; margin: 0 0 16px;">\u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A, ${name}!</h2>
+  const bodyHtml = `
+      <h2 style="color: #f1f5f9; font-size: 22px; margin: 0 0 16px;">\u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A, ${escapeHtml(name)}!</h2>
       <p style="color: #94a3b8; line-height: 1.7; margin: 0 0 24px;">
-        \u101E\u1004\u103A\u104F PilotHub application \u1000\u102D\u102F approved \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B 
+        \u101E\u1004\u103A\u104F PilotHub application \u1000\u102D\u102F approved \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
         \u101A\u1001\u102F <strong style="color: #22c55e;">free plan</strong> \u1016\u103C\u1004\u1037\u103A \u1005\u1010\u1004\u103A\u1005\u1019\u103A\u1038\u101E\u1015\u103A\u1014\u102D\u102F\u1004\u103A\u1015\u103C\u102E\u1038 AI advisors \u1019\u103B\u102C\u1038\u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B
       </p>
-      <!-- Login URL as plain green text -->
       <div style="text-align: center; margin: 32px 0;">
-        <p style="color: #22c55e; font-size: 16px; font-weight: 600; margin: 0;">https://pilothub.vip \u101E\u102D\u102F\u1037 \u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u102B</p>
+        <p style="color: #22c55e; font-size: 16px; font-weight: 600; margin: 0;">${escapeHtml(loginUrl)} \u101E\u102D\u102F\u1037 \u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u102B</p>
       </div>
-      <!-- Features -->
       <div style="background: #0a1628; border-radius: 12px; padding: 24px; border: 1px solid #1e3a5f;">
-        <p style="color: #64748b; font-size: 13px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 1px;">\u101B\u101B\u103E\u102D\u1019\u100A\u1037\u103A features</p>
+        <p style="color: #64748b; font-size: 13px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 1px;">\u101B\u101B\u103E\u102D\u1019\u100A\u1037\u103A features (${escapeHtml(planName)})</p>
         <ul style="color: #94a3b8; line-height: 2; margin: 0; padding-left: 20px;">
-          <li><strong style="color: #22c55e;">BizPilot AI</strong> \u2014 Business strategy & operations (Free: \u1005\u102C \u1045 \u1000\u103C\u1031\u102C\u1004\u103A\u1038)</li>
-          <li><strong style="color: #f59e0b;">FounderPilot AI</strong> \u2014 Founder & CEO advisory (Free: \u1005\u102C \u1045 \u1000\u103C\u1031\u102C\u1004\u103A\u1038)</li>
+          <li><strong style="color: #22c55e;">BizPilot AI</strong> \u2014 Business strategy & operations</li>
+          <li><strong style="color: #f59e0b;">FounderPilot AI</strong> \u2014 Founder & CEO advisory</li>
           <li>Myanmar business context \u1014\u102C\u1038\u101C\u100A\u103A\u101E\u1031\u102C AI</li>
-          <li>\u1021\u1014\u102C\u1002\u1010\u103A\u1010\u103D\u1004\u103A \u1011\u103D\u1000\u103A\u101B\u103E\u102D\u1019\u100A\u1037\u103A AI models \u1021\u101E\u1005\u103A\u1019\u103B\u102C\u1038\u1000\u102D\u102F <strong style="color: #22c55e;">Early Access</strong> \u1016\u103C\u1004\u1037\u103A \u1019\u103C\u100A\u103A\u1038\u1005\u1019\u103A\u1038\u1001\u103D\u1004\u1037\u103A \u101B\u101B\u103E\u102D\u1019\u100A\u103A</li>
-          <li>Conversation history \u101E\u102D\u1019\u103A\u1038\u1006\u100A\u103A\u1038\u1014\u102D\u102F\u1004\u103A</li>
         </ul>
       </div>
       <p style="color: #475569; font-size: 13px; margin: 24px 0 0; text-align: center;">
         \u1019\u1031\u1038\u1001\u103D\u1014\u103A\u1038\u1019\u103B\u102C\u1038\u101B\u103E\u102D\u1015\u102B\u1000 <a href="mailto:chatpilot.mm@gmail.com" style="color: #22c55e;">chatpilot.mm@gmail.com</a> \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B
       </p>
-    </div>
-    <!-- Footer -->
-    <div style="padding: 20px 40px; border-top: 1px solid #1e3a5f; text-align: center;">
-      <p style="color: #334155; font-size: 12px; margin: 0;">Powered by ChatPilot \xB7 Myanmar Business AI Platform</p>
-    </div>
-  </div>
-</body>
-</html>
   `;
   return sendEmail({
     to,
     subject: `\u2705 PilotHub Application Approved \u2014 \u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A ${name}!`,
-    html,
+    html: wrapPilotHubEmailHtml(bodyHtml),
     text: `\u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A ${name}!
 
 \u101E\u1004\u103A\u104F PilotHub application \u1000\u102D\u102F approved \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
 free plan \u1016\u103C\u1004\u1037\u103A \u1005\u1010\u1004\u103A\u1005\u1019\u103A\u1038\u101E\u1015\u103A\u1014\u102D\u102F\u1004\u103A\u1015\u103C\u102E\u1038 AI advisors \u1019\u103B\u102C\u1038\u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B
 
-https://pilothub.vip \u101E\u102D\u102F\u1037 \u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u102B
+${loginUrl} \u101E\u102D\u102F\u1037 \u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u102B
 
 Powered by ChatPilot`
   });
@@ -3490,34 +3616,17 @@ async function sendPaymentConfirmationEmail({
   plan
 }) {
   const planName = plan === "bizpilot" ? "BizPilot" : plan === "founderpilot" ? "FounderPilot" : plan;
-  const html = `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: 'Segoe UI', Arial, sans-serif; background: #0a1628; color: #e2e8f0; margin: 0; padding: 0;">
-  <div style="max-width: 600px; margin: 40px auto; background: #0f1f35; border-radius: 16px; overflow: hidden; border: 1px solid #1e3a5f;">
-    <div style="background: linear-gradient(135deg, #0f2a1e 0%, #0a1628 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid #1e3a5f;">
-      <h1 style="color: #22c55e; font-size: 28px; font-weight: 800; margin: 0;">PILOTHUB</h1>
-      <p style="color: #64748b; font-size: 13px; margin: 4px 0 0;">by ChatPilot</p>
-    </div>
-    <div style="padding: 40px;">
+  const bodyHtml = `
       <h2 style="color: #f1f5f9; font-size: 22px; margin: 0 0 16px;">\u{1F4B3} Payment Confirmed!</h2>
       <p style="color: #94a3b8; line-height: 1.7;">
-        ${name} \u104F <strong style="color: #22c55e;">${planName}</strong> plan payment \u1000\u102D\u102F confirmed \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
+        ${escapeHtml(name)} \u104F <strong style="color: #22c55e;">${escapeHtml(planName)}</strong> plan payment \u1000\u102D\u102F confirmed \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
         Subscription \u1000\u102D\u102F activate \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
       </p>
-      <p style="color: #475569; font-size: 13px; margin: 24px 0 0; text-align: center;">
-        Powered by ChatPilot \xB7 Myanmar Business AI Platform
-      </p>
-    </div>
-  </div>
-</body>
-</html>
   `;
   return sendEmail({
     to,
     subject: `\u2705 PilotHub Payment Confirmed \u2014 ${planName} Plan`,
-    html,
+    html: wrapPilotHubEmailHtml(bodyHtml),
     text: `${name} \u104F ${planName} plan payment \u1000\u102D\u102F confirmed \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
 
 Powered by ChatPilot`
@@ -3630,6 +3739,21 @@ var appRouter = router({
         plan: input.plan,
         source: "website"
       });
+      try {
+        await sendNewApplicationNotificationEmail({
+          fullName: input.fullName,
+          email: normalizedEmail,
+          phone: input.phone,
+          businessName: input.businessName,
+          businessType: input.businessType,
+          useCase: input.useCase,
+          plan: input.plan,
+          source: "website",
+          applicationId: app2.id
+        });
+      } catch (e) {
+        console.error("[applications.submit] Application notification email failed:", e);
+      }
       try {
         await notifyOwner({
           title: `\u{1F4CB} New Application: ${input.fullName}`,
@@ -4165,7 +4289,8 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         return {
           bizBotUsername,
           founderBotUsername,
-          bizBotUsernameConfigured: isTelegramBotUsernameConfigured2(bizBotUsername)
+          bizBotUsernameConfigured: isTelegramBotUsernameConfigured2(bizBotUsername),
+          founderBotUsernameConfigured: founderBotUsername ? isTelegramBotUsernameConfigured2(founderBotUsername) : false
         };
       }),
       list: publicProcedure.query(async ({ ctx }) => {
@@ -4272,14 +4397,16 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
       createActivationToken: publicProcedure.input(
         z2.object({
           userId: z2.number(),
-          botUsername: z2.string().min(1).optional()
+          botUsername: z2.string().min(1).optional(),
+          planType: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot")
         })
       ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         try {
           return await generateTelegramActivationToken(
             input.userId,
-            input.botUsername
+            input.botUsername,
+            input.planType
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : "Failed to generate token";
@@ -4290,17 +4417,73 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
       generateLink: publicProcedure.input(
         z2.object({
           userId: z2.number(),
-          botUsername: z2.string().min(1).optional()
+          botUsername: z2.string().min(1).optional(),
+          planType: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot")
         })
       ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         try {
-          return await generateTelegramActivationToken(input.userId, input.botUsername);
+          return await generateTelegramActivationToken(
+            input.userId,
+            input.botUsername,
+            input.planType
+          );
         } catch (err) {
           const message = err instanceof Error ? err.message : "Failed to generate link";
           throw new TRPCError3({ code: "BAD_REQUEST", message });
         }
       })
+    }),
+    sendBroadcastEmail: publicProcedure.input(
+      z2.object({
+        mode: z2.enum(["all_approved", "single"]),
+        userId: z2.number().int().positive().optional(),
+        subject: z2.string().min(1).max(200),
+        message: z2.string().min(1).max(2e4)
+      })
+    ).mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx);
+      let recipients;
+      if (input.mode === "single") {
+        if (!input.userId) {
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: "userId is required for single-user broadcast"
+          });
+        }
+        const user = await getUserById(input.userId);
+        if (!user?.email?.trim()) {
+          throw new TRPCError3({ code: "NOT_FOUND", message: "User not found or has no email" });
+        }
+        recipients = [
+          { id: user.id, email: user.email.trim(), name: user.name ?? null }
+        ];
+      } else {
+        recipients = await listApprovedUserEmails();
+        if (recipients.length === 0) {
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: "No approved users with email addresses found"
+          });
+        }
+      }
+      let sent = 0;
+      let failed = 0;
+      for (const recipient of recipients) {
+        const ok = await sendBroadcastEmail({
+          to: recipient.email,
+          subject: input.subject,
+          message: input.message
+        });
+        if (ok) sent += 1;
+        else failed += 1;
+      }
+      return {
+        success: failed === 0,
+        sent,
+        failed,
+        total: recipients.length
+      };
     }),
     // ── External API Token management ──
     externalTokens: router({
@@ -4468,6 +4651,21 @@ function registerPublicApiRoutes(app2) {
           source: "external_api"
         });
         paymentId = payment.id;
+      }
+      try {
+        await sendNewApplicationNotificationEmail({
+          fullName,
+          email,
+          phone,
+          businessName,
+          businessType,
+          useCase,
+          plan: validPlan,
+          source: "external_api",
+          applicationId: app_.id
+        });
+      } catch (e) {
+        console.error("[PublicAPI] Application notification email failed:", e);
       }
       try {
         await notifyOwner({

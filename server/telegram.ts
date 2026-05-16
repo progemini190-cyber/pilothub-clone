@@ -307,14 +307,24 @@ async function handleChatMessage(
     return;
   }
 
-  await db.appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+  try {
+    await db.decrementTelegramMessageLimit(user.id, isBiz);
+    console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
+  } catch (err) {
+    console.error("[Telegram] Failed to decrement message limit:", {
+      chatId,
+      userId: user.id,
+      isBiz,
+      advisorSlug,
+      err,
+    });
+  }
 
-  await db.decrementTelegramMessageLimit(user.id, advisorSlug);
-  console.log("[Telegram] Message limit decremented after successful delivery", {
-    userId: user.id,
-    advisorSlug,
-    isBiz,
-  });
+  try {
+    await db.appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+  } catch (err) {
+    console.error("[Telegram] appendTelegramLlmTurnPair failed (reply already sent):", err);
+  }
 }
 
 async function safeGetUserByTelegramChatId(chatId: string) {

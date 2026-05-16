@@ -1138,16 +1138,33 @@ export async function updateTelegramUserPlan(input: {
   await db.update(users).set(updateSet as Record<string, unknown>).where(eq(users.id, input.userId));
 }
 
-export async function decrementTelegramMessageLimit(userId: number, advisor: AdvisorSlug) {
-  const db = await getDb();
-  if (!db) return;
-  const user = await getUserById(userId);
-  if (!user) return;
-  if (advisor === "bizpilot") {
-    const newLimit = Math.max(0, (user.bizMessageLimit ?? 0) - 1);
-    await db.update(users).set({ bizMessageLimit: newLimit }).where(eq(users.id, userId));
+/**
+ * Atomically decrement Telegram remaining messages and increment used counter.
+ * Uses SQL expressions to avoid read-modify-write races under concurrent webhooks.
+ */
+export async function decrementTelegramMessageLimit(
+  userId: number,
+  isBiz: boolean,
+): Promise<void> {
+  const db = await assertDatabase();
+
+  if (isBiz) {
+    await db
+      .update(users)
+      .set({
+        bizMessageLimit: sql`max(0, ${users.bizMessageLimit} - 1)`,
+        bizMessagesUsed: sql`${users.bizMessagesUsed} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
   } else {
-    const newLimit = Math.max(0, (user.founderMessageLimit ?? 0) - 1);
-    await db.update(users).set({ founderMessageLimit: newLimit }).where(eq(users.id, userId));
+    await db
+      .update(users)
+      .set({
+        founderMessageLimit: sql`max(0, ${users.founderMessageLimit} - 1)`,
+        founderMessagesUsed: sql`${users.founderMessagesUsed} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
   }
 }
