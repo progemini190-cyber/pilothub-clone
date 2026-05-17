@@ -444,27 +444,35 @@ export const appRouter = router({
         return await db.listSystemSettings();
       }),
       set: publicProcedure
-        .input(z.object({ key: z.string(), value: z.string() }))
+        .input(
+          z.union([
+            z.object({ key: z.string(), value: z.string() }),
+            z.object({
+              method: z.enum(["kbzpay", "wavepay", "ayapay"]),
+              phone: z.string(),
+              name: z.string(),
+              qrDataUrl: z
+                .string()
+                .optional()
+                .refine(
+                  (s) => s === undefined || s.startsWith("data:image/"),
+                  "QR must be a data:image/... URL",
+                ),
+            }),
+          ]),
+        )
         .mutation(async ({ ctx, input }) => {
           await requireAdmin(ctx);
-          await db.setSystemSetting(input.key, input.value);
+          if ("key" in input) {
+            await db.setSystemSetting(input.key, input.value);
+          } else {
+            await db.setSystemSetting(`${input.method}_phone`, input.phone);
+            await db.setSystemSetting(`${input.method}_name`, input.name);
+            if (input.qrDataUrl) {
+              await db.setSystemSetting(`${input.method}_qr_url`, input.qrDataUrl);
+            }
+          }
           return { success: true };
-        }),
-      // Save payment QR as base64 data URL in system_settings (no external storage)
-      uploadQr: publicProcedure
-        .input(z.object({
-          qrDataUrl: z
-            .string()
-            .min(1)
-            .refine((s) => s.startsWith("data:image/"), "QR must be a data:image/... URL"),
-          method: z.enum(["kbzpay", "wavepay", "ayapay", "default"]).optional().default("default"),
-        }))
-        .mutation(async ({ ctx, input }) => {
-          await requireAdmin(ctx);
-          const settingKey =
-            input.method === "default" ? "payment_qr_url" : `${input.method}_qr_url`;
-          await db.setSystemSetting(settingKey, input.qrDataUrl);
-          return { success: true, url: input.qrDataUrl };
         }),
     }),
 

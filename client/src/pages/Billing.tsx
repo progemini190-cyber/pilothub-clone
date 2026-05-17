@@ -290,7 +290,13 @@ export default function Billing() {
                 const mInfo = paymentSettings?.[methodKey];
                 const phone = mInfo?.phone || paymentSettings?.phone;
                 const name = mInfo?.name || paymentSettings?.kpayName;
-                const qrUrl = mInfo?.qrUrl || paymentSettings?.qrUrl;
+                const rawQrUrl = mInfo?.qrUrl || paymentSettings?.qrUrl;
+                const qrUrl =
+                  rawQrUrl &&
+                  !rawQrUrl.startsWith("/manus-storage/") &&
+                  rawQrUrl.startsWith("data:image/")
+                    ? rawQrUrl
+                    : null;
                 if (!phone && !qrUrl) return null;
                 return (
                   <>

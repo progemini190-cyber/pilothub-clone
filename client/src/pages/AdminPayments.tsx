@@ -15,6 +15,13 @@ function formatMMK(amount: number) {
   return new Intl.NumberFormat("my-MM").format(amount) + " ကျပ်";
 }
 
+/** Only render QR images stored as base64 data URLs (legacy /manus-storage/ URLs are broken). */
+function displayableQrUrl(url: string | null | undefined): string | null {
+  if (!url || url.startsWith("/manus-storage/")) return null;
+  if (url.startsWith("data:image/")) return url;
+  return null;
+}
+
 type Payment = {
   id: number;
   userId: number;
@@ -61,7 +68,6 @@ export default function AdminPayments() {
 
   const { data: settingsData, refetch: refetchSettings } = trpc.payments.settings.useQuery();
   const setSystemSetting = trpc.admin.settings.set.useMutation();
-  const uploadQr = trpc.admin.settings.uploadQr.useMutation();
   const handleQrFileChange = (method: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -79,11 +85,14 @@ export default function AdminPayments() {
     const ms = methodState[method];
     setSavingSettings(true);
     try {
-      await setSystemSetting.mutateAsync({ key: `${method}_phone`, value: ms.phone.trim() });
-      await setSystemSetting.mutateAsync({ key: `${method}_name`, value: ms.name.trim() });
-      if (ms.qrPreview?.startsWith("data:image/")) {
-        await uploadQr.mutateAsync({ qrDataUrl: ms.qrPreview, method });
-      }
+      await setSystemSetting.mutateAsync({
+        method,
+        phone: ms.phone.trim(),
+        name: ms.name.trim(),
+        ...(ms.qrPreview?.startsWith("data:image/")
+          ? { qrDataUrl: ms.qrPreview }
+          : {}),
+      });
       const updated = await refetchSettings();
       initMethodState(updated.data);
       toast.success("Settings saved");
@@ -97,9 +106,21 @@ export default function AdminPayments() {
   const initMethodState = (sd: typeof settingsData) => {
     if (!sd) return;
     setMethodState({
-      kbzpay: { phone: sd.kbzpay?.phone ?? "", name: sd.kbzpay?.name ?? "", qrPreview: sd.kbzpay?.qrUrl ?? null },
-      wavepay: { phone: sd.wavepay?.phone ?? "", name: sd.wavepay?.name ?? "", qrPreview: sd.wavepay?.qrUrl ?? null },
-      ayapay: { phone: sd.ayapay?.phone ?? "", name: sd.ayapay?.name ?? "", qrPreview: sd.ayapay?.qrUrl ?? null },
+      kbzpay: {
+        phone: sd.kbzpay?.phone ?? "",
+        name: sd.kbzpay?.name ?? "",
+        qrPreview: displayableQrUrl(sd.kbzpay?.qrUrl),
+      },
+      wavepay: {
+        phone: sd.wavepay?.phone ?? "",
+        name: sd.wavepay?.name ?? "",
+        qrPreview: displayableQrUrl(sd.wavepay?.qrUrl),
+      },
+      ayapay: {
+        phone: sd.ayapay?.phone ?? "",
+        name: sd.ayapay?.name ?? "",
+        qrPreview: displayableQrUrl(sd.ayapay?.qrUrl),
+      },
     });
   };
 
@@ -227,7 +248,8 @@ export default function AdminPayments() {
           ];
           const cur = settingsData?.[activeMethodTab];
           const ms = methodState[activeMethodTab];
-          const displayQr = ms?.qrPreview ?? cur?.qrUrl ?? null;
+          const displayQr = displayableQrUrl(ms?.qrPreview) ?? displayableQrUrl(cur?.qrUrl);
+          const savedDisplayQr = displayableQrUrl(cur?.qrUrl);
           return (
             <div className="rounded-2xl p-6 space-y-5" style={{ background: "oklch(15% 0.04 220)", border: "1px solid oklch(72% 0.18 162 / 0.2)" }}>
               <h3 className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>💳 Payment Settings</h3>
@@ -250,12 +272,16 @@ export default function AdminPayments() {
                   <p className="text-xs font-semibold" style={{ color: "oklch(72% 0.18 162)" }}>Saved Settings</p>
                   {cur.phone && <p className="text-sm text-white">Phone: {cur.phone}</p>}
                   {cur.name && <p className="text-sm text-white">Name: {cur.name}</p>}
-                  {cur.qrUrl && (
+                  {savedDisplayQr ? (
                     <div>
                       <p className="text-xs mb-2" style={{ color: "oklch(55% 0.03 220)" }}>Current QR:</p>
-                      <img src={cur.qrUrl} alt="QR" className="w-24 h-24 rounded-lg" style={{ background: "white", padding: "4px" }} />
+                      <img src={savedDisplayQr} alt="QR" className="w-24 h-24 rounded-lg object-contain" style={{ background: "white", padding: "4px" }} />
                     </div>
-                  )}
+                  ) : cur?.qrUrl?.startsWith("/manus-storage/") ? (
+                    <p className="text-xs" style={{ color: "oklch(55% 0.03 220)" }}>
+                      Previous QR was stored externally — upload a new image below.
+                    </p>
+                  ) : null}
                 </div>
               )}
               {/* Edit fields */}

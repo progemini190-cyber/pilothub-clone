@@ -4316,20 +4316,31 @@ Ref: ${input.transactionRef ?? "N/A"}`
         await requireAdmin(ctx);
         return await listSystemSettings();
       }),
-      set: publicProcedure.input(z2.object({ key: z2.string(), value: z2.string() })).mutation(async ({ ctx, input }) => {
+      set: publicProcedure.input(
+        z2.union([
+          z2.object({ key: z2.string(), value: z2.string() }),
+          z2.object({
+            method: z2.enum(["kbzpay", "wavepay", "ayapay"]),
+            phone: z2.string(),
+            name: z2.string(),
+            qrDataUrl: z2.string().optional().refine(
+              (s) => s === void 0 || s.startsWith("data:image/"),
+              "QR must be a data:image/... URL"
+            )
+          })
+        ])
+      ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
-        await setSystemSetting(input.key, input.value);
+        if ("key" in input) {
+          await setSystemSetting(input.key, input.value);
+        } else {
+          await setSystemSetting(`${input.method}_phone`, input.phone);
+          await setSystemSetting(`${input.method}_name`, input.name);
+          if (input.qrDataUrl) {
+            await setSystemSetting(`${input.method}_qr_url`, input.qrDataUrl);
+          }
+        }
         return { success: true };
-      }),
-      // Save payment QR as base64 data URL in system_settings (no external storage)
-      uploadQr: publicProcedure.input(z2.object({
-        qrDataUrl: z2.string().min(1).refine((s) => s.startsWith("data:image/"), "QR must be a data:image/... URL"),
-        method: z2.enum(["kbzpay", "wavepay", "ayapay", "default"]).optional().default("default")
-      })).mutation(async ({ ctx, input }) => {
-        await requireAdmin(ctx);
-        const settingKey = input.method === "default" ? "payment_qr_url" : `${input.method}_qr_url`;
-        await setSystemSetting(settingKey, input.qrDataUrl);
-        return { success: true, url: input.qrDataUrl };
       })
     }),
     // ── Applications management ──
