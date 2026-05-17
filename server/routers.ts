@@ -450,22 +450,21 @@ export const appRouter = router({
           await db.setSystemSetting(input.key, input.value);
           return { success: true };
         }),
-      // Upload QR code image (supports per-method: kbzpay, wavepay, ayapay)
+      // Save payment QR as base64 data URL in system_settings (no external storage)
       uploadQr: publicProcedure
         .input(z.object({
-          filename: z.string(),
-          contentType: z.string(),
-          dataBase64: z.string(),
+          qrDataUrl: z
+            .string()
+            .min(1)
+            .refine((s) => s.startsWith("data:image/"), "QR must be a data:image/... URL"),
           method: z.enum(["kbzpay", "wavepay", "ayapay", "default"]).optional().default("default"),
         }))
         .mutation(async ({ ctx, input }) => {
           await requireAdmin(ctx);
-          const buffer = Buffer.from(input.dataBase64, "base64");
-          const key = `payment-qr/${input.method}-${Date.now()}-${input.filename}`;
-          const { url } = await storagePut(key, buffer, input.contentType);
-          const settingKey = input.method === "default" ? "payment_qr_url" : `${input.method}_qr_url`;
-          await db.setSystemSetting(settingKey, url);
-          return { success: true, url };
+          const settingKey =
+            input.method === "default" ? "payment_qr_url" : `${input.method}_qr_url`;
+          await db.setSystemSetting(settingKey, input.qrDataUrl);
+          return { success: true, url: input.qrDataUrl };
         }),
     }),
 

@@ -216,6 +216,8 @@ var init_schema = __esm({
       hasUsedFounderStarter: text("hasUsedFounderStarter", { enum: ["true", "false"] }).notNull().default("false"),
       telegramChatId: text("telegramChatId", { length: 64 }),
       planExpiryDate: integer("planExpiryDate", { mode: "timestamp_ms" }),
+      passwordHash: text("passwordHash"),
+      onboardingCompletedAt: integer("onboardingCompletedAt", { mode: "timestamp_ms" }),
       createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()),
       updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date()).$onUpdate(() => /* @__PURE__ */ new Date()),
       lastSignedIn: integer("lastSignedIn", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
@@ -393,6 +395,8 @@ var init_schema_mysql = __esm({
       hasUsedFounderStarter: mysqlEnum("hasUsedFounderStarter", ["true", "false"]).notNull().default("false"),
       telegramChatId: varchar("telegramChatId", { length: 64 }),
       planExpiryDate: timestamp("planExpiryDate"),
+      passwordHash: text2("passwordHash"),
+      onboardingCompletedAt: timestamp("onboardingCompletedAt"),
       createdAt: timestamp("createdAt").notNull().defaultNow(),
       updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
       lastSignedIn: timestamp("lastSignedIn").notNull().defaultNow()
@@ -650,9 +654,119 @@ var init_ensureTelegramSchema = __esm({
   }
 });
 
+// server/db/ensureAuthSchema.ts
+var ensureAuthSchema_exports = {};
+__export(ensureAuthSchema_exports, {
+  ensureAuthSchema: () => ensureAuthSchema,
+  resetAuthSchemaCache: () => resetAuthSchemaCache
+});
+import { eq, sql as sql2 } from "drizzle-orm";
+function isBenignMigrationError2(err) {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return msg.includes("duplicate column") || msg.includes("already exists") || msg.includes("duplicate key name");
+}
+async function runTurso2(statement) {
+  const { createClient: createClient3 } = await import("@libsql/client");
+  const config = resolveTursoConfig();
+  if (!config) return;
+  const client = createClient3({ url: config.url, authToken: config.authToken });
+  try {
+    await client.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError2(err)) throw err;
+  }
+}
+async function runMysql2(statement) {
+  const pool = getMysqlPool();
+  if (!pool) return;
+  try {
+    await pool.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError2(err)) throw err;
+  }
+}
+async function runDrizzle2(statement) {
+  const db = await getDb();
+  if (!db) return;
+  const query = sql2.raw(statement);
+  const d = db;
+  try {
+    if (typeof d.execute === "function") await d.execute(query);
+    else if (typeof d.run === "function") await d.run(query);
+  } catch (err) {
+    if (!isBenignMigrationError2(err)) throw err;
+  }
+}
+async function runStatement2(statement) {
+  const provider = getDatabaseProvider();
+  if (provider === "mysql") await runMysql2(statement);
+  else if (resolveTursoConfig()) await runTurso2(statement);
+  else await runDrizzle2(statement);
+}
+async function ensureAuthColumns() {
+  if (_columnsReady) return;
+  const provider = getDatabaseProvider();
+  if (provider === "mysql") {
+    await runStatement2("ALTER TABLE `users` ADD COLUMN `passwordHash` text");
+    await runStatement2("ALTER TABLE `users` ADD COLUMN `onboardingCompletedAt` timestamp NULL");
+  } else {
+    await runStatement2("ALTER TABLE `users` ADD COLUMN `passwordHash` text");
+    await runStatement2("ALTER TABLE `users` ADD COLUMN `onboardingCompletedAt` integer");
+  }
+  _columnsReady = true;
+  console.info("[Database] Auth columns synced", { provider: provider ?? "turso" });
+}
+async function migrateLegacyUsersToActive() {
+  if (_migrationDone) return;
+  const db = await getDb();
+  if (!db) return;
+  const allUsers = await db.select().from(users3);
+  const now = /* @__PURE__ */ new Date();
+  let updated = 0;
+  for (const user of allUsers) {
+    const patch = {};
+    const status = user.status ?? "";
+    if (isPendingUserStatus(status) || !isApprovedUserStatus(status)) {
+      patch.status = "active";
+    }
+    const hasName = Boolean((user.name ?? "").trim());
+    const hasPurpose = Boolean((user.useCase ?? "").trim());
+    const completedAt = user.onboardingCompletedAt;
+    if (hasName && hasPurpose && !completedAt) {
+      patch.onboardingCompletedAt = now;
+    }
+    if (Object.keys(patch).length > 0) {
+      await db.update(users3).set(patch).where(eq(users3.id, user.id));
+      updated++;
+    }
+  }
+  _migrationDone = true;
+  if (updated > 0) {
+    console.info("[Database] Legacy user migration", { usersPatched: updated });
+  }
+}
+async function ensureAuthSchema() {
+  await ensureAuthColumns();
+  await migrateLegacyUsersToActive();
+}
+function resetAuthSchemaCache() {
+  _columnsReady = false;
+  _migrationDone = false;
+}
+var _columnsReady, _migrationDone;
+var init_ensureAuthSchema = __esm({
+  "server/db/ensureAuthSchema.ts"() {
+    "use strict";
+    init_connection();
+    init_userStatus();
+    _columnsReady = false;
+    _migrationDone = false;
+  }
+});
+
 // server/db/connection.ts
 import { createClient as createClient2 } from "@libsql/client";
-import { sql as sql2 } from "drizzle-orm";
+import { sql as sql3 } from "drizzle-orm";
 import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
 import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
@@ -737,7 +851,7 @@ function tokenFingerprint(token) {
 }
 async function countUsers(database) {
   try {
-    const [row] = await database.select({ count: sql2`count(*)` }).from(users3);
+    const [row] = await database.select({ count: sql3`count(*)` }).from(users3);
     return Number(row?.count ?? 0);
   } catch {
     return -1;
@@ -745,9 +859,9 @@ async function countUsers(database) {
 }
 async function logHealth(database, provider) {
   try {
-    const [userRow] = await database.select({ count: sql2`count(*)` }).from(users3);
-    const [payRow] = await database.select({ count: sql2`count(*)` }).from(payments3);
-    const [keyRow] = await database.select({ count: sql2`count(*)` }).from(apiKeys3);
+    const [userRow] = await database.select({ count: sql3`count(*)` }).from(users3);
+    const [payRow] = await database.select({ count: sql3`count(*)` }).from(payments3);
+    const [keyRow] = await database.select({ count: sql3`count(*)` }).from(apiKeys3);
     const userCount = Number(userRow?.count ?? 0);
     console.info("[Database] Health check", {
       provider,
@@ -820,6 +934,10 @@ async function initializeDatabase() {
       await ensureTelegramSchema2().catch(
         (err) => console.warn("[Database] Telegram schema migration skipped:", err)
       );
+      const { ensureAuthSchema: ensureAuthSchema2 } = await Promise.resolve().then(() => (init_ensureAuthSchema(), ensureAuthSchema_exports));
+      await ensureAuthSchema2().catch(
+        (err) => console.warn("[Database] Auth schema migration skipped:", err)
+      );
       return _db;
     }
   }
@@ -850,6 +968,10 @@ async function initializeDatabase() {
           await ensureTelegramSchema2().catch(
             (err) => console.warn("[Database] Telegram schema migration skipped:", err)
           );
+          const { ensureAuthSchema: ensureAuthSchema2 } = await Promise.resolve().then(() => (init_ensureAuthSchema(), ensureAuthSchema_exports));
+          await ensureAuthSchema2().catch(
+            (err) => console.warn("[Database] Auth schema migration skipped:", err)
+          );
           return _db;
         }
       }
@@ -873,6 +995,10 @@ async function initializeDatabase() {
       await ensureTelegramSchema2().catch(
         (err) => console.warn("[Database] Telegram schema migration skipped:", err)
       );
+      const { ensureAuthSchema: ensureAuthSchema2 } = await Promise.resolve().then(() => (init_ensureAuthSchema(), ensureAuthSchema_exports));
+      await ensureAuthSchema2().catch(
+        (err) => console.warn("[Database] Auth schema migration skipped:", err)
+      );
       return _db;
     }
   }
@@ -892,6 +1018,10 @@ async function initializeDatabase() {
         const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
         await ensureTelegramSchema2().catch(
           (err) => console.warn("[Database] Telegram schema migration skipped:", err)
+        );
+        const { ensureAuthSchema: ensureAuthSchema2 } = await Promise.resolve().then(() => (init_ensureAuthSchema(), ensureAuthSchema_exports));
+        await ensureAuthSchema2().catch(
+          (err) => console.warn("[Database] Auth schema migration skipped:", err)
         );
         return _db;
       }
@@ -940,7 +1070,7 @@ var init_connection = __esm({
 });
 
 // server/db.ts
-import { eq, and, desc, asc, sql as sql3, inArray, or } from "drizzle-orm";
+import { eq as eq2, and, desc, asc, sql as sql4, inArray, or } from "drizzle-orm";
 async function assertDatabase() {
   const database = await getDb();
   if (!database) {
@@ -1002,13 +1132,13 @@ async function upsertUser(user) {
 async function getUserByOpenId(openId) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(users3).where(eq(users3.openId, openId)).limit(1);
+  const result = await db.select().from(users3).where(eq2(users3.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
 async function getUserById(id) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(users3).where(eq(users3.id, id)).limit(1);
+  const result = await db.select().from(users3).where(eq2(users3.id, id)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
 function normalizeEmail(email) {
@@ -1018,7 +1148,7 @@ async function getUsersByEmail(email) {
   const db = await getDb();
   if (!db) return [];
   const normalized = normalizeEmail(email);
-  return db.select().from(users3).where(sql3`lower(trim(${users3.email})) = ${normalized}`).orderBy(asc(users3.id));
+  return db.select().from(users3).where(sql4`lower(trim(${users3.email})) = ${normalized}`).orderBy(asc(users3.id));
 }
 async function getUserByEmail(email) {
   const matches = await getUsersByEmail(email);
@@ -1035,7 +1165,7 @@ async function resolveUserForGoogleLogin(email, googleSub) {
     if (byOpenId && byOpenId.id !== canonical.id && isPendingUserStatus2(byOpenId.status)) {
       const database = await getDb();
       if (database) {
-        await database.delete(users3).where(eq(users3.id, byOpenId.id));
+        await database.delete(users3).where(eq2(users3.id, byOpenId.id));
         console.info("[Database] Removed stale pending Google row", {
           removedId: byOpenId.id,
           keptId: canonical.id,
@@ -1058,7 +1188,7 @@ async function linkUserToGoogleOpenId(userId, googleOpenId, fields) {
   const conflicting = await getUserByOpenId(googleOpenId);
   if (conflicting && conflicting.id !== userId) {
     if (conflicting.status === "pending" && conflicting.loginMethod === "google") {
-      await db.delete(users3).where(eq(users3.id, conflicting.id));
+      await db.delete(users3).where(eq2(users3.id, conflicting.id));
     } else {
       throw new Error("This Google account is already linked to another user");
     }
@@ -1069,7 +1199,7 @@ async function linkUserToGoogleOpenId(userId, googleOpenId, fields) {
     lastSignedIn: /* @__PURE__ */ new Date()
   };
   if (fields.name !== void 0) updateSet.name = fields.name;
-  await db.update(users3).set(updateSet).where(eq(users3.id, userId));
+  await db.update(users3).set(updateSet).where(eq2(users3.id, userId));
 }
 async function getMessageUsage(userId, advisor) {
   const db = await getDb();
@@ -1083,7 +1213,7 @@ async function getMessageUsage(userId, advisor) {
     planTypeFounder: users3.planTypeFounder,
     hasUsedBizStarter: users3.hasUsedBizStarter,
     hasUsedFounderStarter: users3.hasUsedFounderStarter
-  }).from(users3).where(eq(users3.id, userId)).limit(1);
+  }).from(users3).where(eq2(users3.id, userId)).limit(1);
   const row = result[0];
   if (!row) return { used: 0, limit: 5, planType: "free", hasUsedStarter: false };
   if (advisor === "bizpilot") {
@@ -1107,9 +1237,9 @@ async function incrementMessageUsed(userId, advisor) {
   if (!db) return;
   const usage = await getMessageUsage(userId, advisor);
   if (advisor === "bizpilot") {
-    await db.update(users3).set({ bizMessagesUsed: usage.used + 1 }).where(eq(users3.id, userId));
+    await db.update(users3).set({ bizMessagesUsed: usage.used + 1 }).where(eq2(users3.id, userId));
   } else {
-    await db.update(users3).set({ founderMessagesUsed: usage.used + 1 }).where(eq(users3.id, userId));
+    await db.update(users3).set({ founderMessagesUsed: usage.used + 1 }).where(eq2(users3.id, userId));
   }
 }
 async function activateTieredPlan(userId, advisor, planType) {
@@ -1133,7 +1263,7 @@ async function activateTieredPlan(userId, advisor, planType) {
       updateData.subscriptionStart = now;
       updateData.subscriptionEnd = end;
     }
-    await db.update(users3).set(updateData).where(eq(users3.id, userId));
+    await db.update(users3).set(updateData).where(eq2(users3.id, userId));
   } else {
     const updateData = {
       planTypeFounder: planType,
@@ -1149,20 +1279,20 @@ async function activateTieredPlan(userId, advisor, planType) {
       updateData.subscriptionStart = now;
       updateData.subscriptionEnd = end;
     }
-    await db.update(users3).set(updateData).where(eq(users3.id, userId));
+    await db.update(users3).set(updateData).where(eq2(users3.id, userId));
   }
 }
 async function getFreeTrialCounts(userId) {
   const db = await getDb();
   if (!db) return { freeBizCount: 10, freeFounderCount: 5 };
-  const result = await db.select({ freeBizCount: users3.freeBizCount, freeFounderCount: users3.freeFounderCount }).from(users3).where(eq(users3.id, userId)).limit(1);
+  const result = await db.select({ freeBizCount: users3.freeBizCount, freeFounderCount: users3.freeFounderCount }).from(users3).where(eq2(users3.id, userId)).limit(1);
   return result[0] ?? { freeBizCount: 10, freeFounderCount: 5 };
 }
 async function getOrCreateConversation(input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   if (input.conversationId) {
-    const existing = await db.select().from(conversations3).where(and(eq(conversations3.id, input.conversationId), eq(conversations3.userId, input.userId))).limit(1);
+    const existing = await db.select().from(conversations3).where(and(eq2(conversations3.id, input.conversationId), eq2(conversations3.userId, input.userId))).limit(1);
     if (existing.length > 0) return existing[0];
   }
   const [row] = await db.insert(conversations3).values({
@@ -1175,18 +1305,18 @@ async function getOrCreateConversation(input) {
 async function listUserConversations(userId, modelSlug, limit = 30) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(conversations3).where(and(eq(conversations3.userId, userId), eq(conversations3.modelSlug, modelSlug))).orderBy(desc(conversations3.updatedAt), desc(conversations3.createdAt)).limit(limit);
+  return db.select().from(conversations3).where(and(eq2(conversations3.userId, userId), eq2(conversations3.modelSlug, modelSlug))).orderBy(desc(conversations3.updatedAt), desc(conversations3.createdAt)).limit(limit);
 }
 async function getConversationById(userId, conversationId) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(conversations3).where(and(eq(conversations3.id, conversationId), eq(conversations3.userId, userId))).limit(1);
+  const result = await db.select().from(conversations3).where(and(eq2(conversations3.id, conversationId), eq2(conversations3.userId, userId))).limit(1);
   return result[0];
 }
 async function listConversationMessages(conversationId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(messages3).where(eq(messages3.conversationId, conversationId)).orderBy(asc(messages3.createdAt));
+  return db.select().from(messages3).where(eq2(messages3.conversationId, conversationId)).orderBy(asc(messages3.createdAt));
 }
 async function createMessage(input) {
   const db = await getDb();
@@ -1202,23 +1332,23 @@ async function createMessage(input) {
 async function touchConversation(conversationId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(conversations3).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq(conversations3.id, conversationId));
+  await db.update(conversations3).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq2(conversations3.id, conversationId));
 }
 async function deleteConversation(conversationId, userId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.delete(messages3).where(eq(messages3.conversationId, conversationId));
-  await db.delete(conversations3).where(and(eq(conversations3.id, conversationId), eq(conversations3.userId, userId)));
+  await db.delete(messages3).where(eq2(messages3.conversationId, conversationId));
+  await db.delete(conversations3).where(and(eq2(conversations3.id, conversationId), eq2(conversations3.userId, userId)));
 }
 async function updateConversationTitle(conversationId, title) {
   const db = await getDb();
   if (!db) return;
-  await db.update(conversations3).set({ title }).where(eq(conversations3.id, conversationId));
+  await db.update(conversations3).set({ title }).where(eq2(conversations3.id, conversationId));
 }
 async function getActiveSystemPrompt(modelSlug) {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.select().from(systemPrompts3).where(and(eq(systemPrompts3.modelSlug, modelSlug), eq(systemPrompts3.isActive, "true"))).orderBy(desc(systemPrompts3.version)).limit(1);
+  const result = await db.select().from(systemPrompts3).where(and(eq2(systemPrompts3.modelSlug, modelSlug), eq2(systemPrompts3.isActive, "true"))).orderBy(desc(systemPrompts3.version)).limit(1);
   return result[0]?.content ?? null;
 }
 async function listSystemPrompts() {
@@ -1228,10 +1358,10 @@ async function listSystemPrompts() {
 async function createSystemPromptVersion(input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const existing = await db.select().from(systemPrompts3).where(eq(systemPrompts3.modelSlug, input.modelSlug)).orderBy(desc(systemPrompts3.version)).limit(1);
+  const existing = await db.select().from(systemPrompts3).where(eq2(systemPrompts3.modelSlug, input.modelSlug)).orderBy(desc(systemPrompts3.version)).limit(1);
   const nextVersion = (existing[0]?.version ?? 0) + 1;
   if (input.activate) {
-    await db.update(systemPrompts3).set({ isActive: "false" }).where(eq(systemPrompts3.modelSlug, input.modelSlug));
+    await db.update(systemPrompts3).set({ isActive: "false" }).where(eq2(systemPrompts3.modelSlug, input.modelSlug));
   }
   const [row] = await db.insert(systemPrompts3).values({
     name: input.name,
@@ -1245,13 +1375,13 @@ async function createSystemPromptVersion(input) {
 async function activateSystemPrompt(promptId, modelSlug) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(systemPrompts3).set({ isActive: "false" }).where(eq(systemPrompts3.modelSlug, modelSlug));
-  await db.update(systemPrompts3).set({ isActive: "true" }).where(eq(systemPrompts3.id, promptId));
+  await db.update(systemPrompts3).set({ isActive: "false" }).where(eq2(systemPrompts3.modelSlug, modelSlug));
+  await db.update(systemPrompts3).set({ isActive: "true" }).where(eq2(systemPrompts3.id, promptId));
 }
 async function getAiModel(targetRole) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(aiModels3).where(eq(aiModels3.targetRole, targetRole)).limit(1);
+  const result = await db.select().from(aiModels3).where(eq2(aiModels3.targetRole, targetRole)).limit(1);
   return result[0];
 }
 async function listAllAiModels() {
@@ -1262,12 +1392,12 @@ async function listAllAiModels() {
 async function updateAiModel(targetRole, modelString) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(aiModels3).set({ modelString, updatedAt: /* @__PURE__ */ new Date() }).where(eq(aiModels3.targetRole, targetRole));
+  await db.update(aiModels3).set({ modelString, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(aiModels3.targetRole, targetRole));
 }
 async function getActiveApiKey(provider) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(apiKeys3).where(and(eq(apiKeys3.provider, provider), eq(apiKeys3.isActive, "true"))).limit(1);
+  const result = await db.select().from(apiKeys3).where(and(eq2(apiKeys3.provider, provider), eq2(apiKeys3.isActive, "true"))).limit(1);
   return result[0];
 }
 async function listAllApiKeys() {
@@ -1278,19 +1408,19 @@ async function listAllApiKeys() {
 async function upsertApiKey(provider, keyValue) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(apiKeys3).set({ isActive: "false" }).where(eq(apiKeys3.provider, provider));
+  await db.update(apiKeys3).set({ isActive: "false" }).where(eq2(apiKeys3.provider, provider));
   await db.insert(apiKeys3).values({ provider, keyValue, isActive: "true" });
 }
 async function deleteApiKey(keyId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(apiKeys3).set({ isActive: "false" }).where(eq(apiKeys3.id, keyId));
+  await db.update(apiKeys3).set({ isActive: "false" }).where(eq2(apiKeys3.id, keyId));
 }
 async function setApiKeyActive(keyId, provider) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(apiKeys3).set({ isActive: "false" }).where(eq(apiKeys3.provider, provider));
-  await db.update(apiKeys3).set({ isActive: "true" }).where(eq(apiKeys3.id, keyId));
+  await db.update(apiKeys3).set({ isActive: "false" }).where(eq2(apiKeys3.provider, provider));
+  await db.update(apiKeys3).set({ isActive: "true" }).where(eq2(apiKeys3.id, keyId));
 }
 async function listAllUsers() {
   const db = await assertDatabase();
@@ -1305,9 +1435,9 @@ async function listApprovedUserEmails() {
     status: users3.status
   }).from(users3).where(
     or(
-      eq(users3.status, "approved"),
-      eq(users3.status, "active"),
-      eq(users3.status, "APPROVED")
+      eq2(users3.status, "approved"),
+      eq2(users3.status, "active"),
+      eq2(users3.status, "APPROVED")
     )
   ).orderBy(desc(users3.createdAt));
   return rows.filter((r) => typeof r.email === "string" && r.email.trim().length > 0).map((r) => ({
@@ -1319,7 +1449,7 @@ async function listApprovedUserEmails() {
 async function updateUserRole(userId, role) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(users3).set({ role }).where(eq(users3.id, userId));
+  await db.update(users3).set({ role }).where(eq2(users3.id, userId));
 }
 async function updateUserProfile(userId, data) {
   const db = await getDb();
@@ -1331,8 +1461,39 @@ async function updateUserProfile(userId, data) {
   if (data.businessType !== void 0) updateSet.businessType = data.businessType;
   if (data.useCase !== void 0) updateSet.useCase = data.useCase;
   if (Object.keys(updateSet).length > 0) {
-    await db.update(users3).set(updateSet).where(eq(users3.id, userId));
+    await db.update(users3).set(updateSet).where(eq2(users3.id, userId));
   }
+}
+async function completeUserOnboarding(userId, data) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const now = /* @__PURE__ */ new Date();
+  await db.update(users3).set({
+    name: data.name.trim(),
+    useCase: data.useCase.trim(),
+    status: "active",
+    onboardingCompletedAt: now,
+    updatedAt: now
+  }).where(eq2(users3.id, userId));
+}
+async function createEmailPasswordUser(input) {
+  const { nanoid: nanoid4 } = await import("nanoid");
+  const db = await assertDatabase();
+  const normalized = normalizeEmail(input.email);
+  const openId = `email_${nanoid4(24)}`;
+  const now = /* @__PURE__ */ new Date();
+  await db.insert(users3).values({
+    openId,
+    email: normalized,
+    name: input.name?.trim() || null,
+    passwordHash: input.passwordHash,
+    loginMethod: "email",
+    role: "user",
+    status: "active",
+    plan: "free",
+    lastSignedIn: now
+  });
+  return { openId };
 }
 async function updateUserSubscription(userId, plan, status) {
   const db = await getDb();
@@ -1340,12 +1501,12 @@ async function updateUserSubscription(userId, plan, status) {
   const now = /* @__PURE__ */ new Date();
   const end = new Date(now);
   end.setMonth(end.getMonth() + 1);
-  await db.update(users3).set({ plan, status, subscriptionStart: now, subscriptionEnd: end, updatedAt: now }).where(eq(users3.id, userId));
+  await db.update(users3).set({ plan, status, subscriptionStart: now, subscriptionEnd: end, updatedAt: now }).where(eq2(users3.id, userId));
 }
 async function deleteUser(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(users3).where(eq(users3.id, userId));
+  await db.delete(users3).where(eq2(users3.id, userId));
 }
 async function createPayment(input) {
   const db = await getDb();
@@ -1372,12 +1533,12 @@ async function listAllPayments() {
 async function listUserPayments(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(payments3).where(eq(payments3.userId, userId)).orderBy(desc(payments3.createdAt));
+  return db.select().from(payments3).where(eq2(payments3.userId, userId)).orderBy(desc(payments3.createdAt));
 }
 async function updatePaymentStatus(paymentId, status) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(payments3).set({ status }).where(eq(payments3.id, paymentId));
+  await db.update(payments3).set({ status }).where(eq2(payments3.id, paymentId));
 }
 async function updatePayment(paymentId, fields) {
   const db = await getDb();
@@ -1390,17 +1551,17 @@ async function updatePayment(paymentId, fields) {
   if (fields.transactionRef !== void 0) updateSet.transactionRef = fields.transactionRef;
   if (fields.notes !== void 0) updateSet.notes = fields.notes;
   if (fields.screenshotUrl !== void 0) updateSet.screenshotUrl = fields.screenshotUrl;
-  await db.update(payments3).set(updateSet).where(eq(payments3.id, paymentId));
+  await db.update(payments3).set(updateSet).where(eq2(payments3.id, paymentId));
 }
 async function deletePayment(paymentId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.delete(payments3).where(eq(payments3.id, paymentId));
+  await db.delete(payments3).where(eq2(payments3.id, paymentId));
 }
 async function getSystemSetting(key) {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.select().from(systemSettings3).where(eq(systemSettings3.key, key)).limit(1);
+  const result = await db.select().from(systemSettings3).where(eq2(systemSettings3.key, key)).limit(1);
   return result[0]?.value ?? null;
 }
 async function setSystemSetting(key, value) {
@@ -1416,22 +1577,6 @@ async function listSystemSettings() {
   if (!db) return [];
   return db.select({ key: systemSettings3.key, value: systemSettings3.value }).from(systemSettings3);
 }
-async function createApplication(input) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const [row] = await db.insert(applications3).values({
-    fullName: input.fullName,
-    email: input.email,
-    phone: input.phone ?? null,
-    businessName: input.businessName ?? null,
-    businessType: input.businessType ?? null,
-    useCase: input.useCase ?? null,
-    plan: input.plan ?? "free",
-    source: input.source ?? "website",
-    status: "pending"
-  }).returning();
-  return row;
-}
 async function listAllApplications() {
   const db = await assertDatabase();
   return db.select().from(applications3).orderBy(desc(applications3.createdAt));
@@ -1439,26 +1584,7 @@ async function listAllApplications() {
 async function getApplicationById(id) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(applications3).where(eq(applications3.id, id)).limit(1);
-  return result[0];
-}
-async function getApplicationByEmail(email) {
-  const db = await getDb();
-  if (!db) return void 0;
-  const normalized = normalizeEmail(email);
-  const result = await db.select().from(applications3).where(sql3`lower(trim(${applications3.email})) = ${normalized}`).orderBy(desc(applications3.createdAt)).limit(1);
-  return result[0];
-}
-async function getApprovedApplicationByEmail(email) {
-  const db = await getDb();
-  if (!db) return void 0;
-  const normalized = normalizeEmail(email);
-  const result = await db.select().from(applications3).where(
-    and(
-      sql3`lower(trim(${applications3.email})) = ${normalized}`,
-      eq(applications3.status, "approved")
-    )
-  ).orderBy(desc(applications3.createdAt)).limit(1);
+  const result = await db.select().from(applications3).where(eq2(applications3.id, id)).limit(1);
   return result[0];
 }
 async function updateApplicationStatus(id, status, userId, notes) {
@@ -1467,12 +1593,12 @@ async function updateApplicationStatus(id, status, userId, notes) {
   const updateSet = { status };
   if (userId !== void 0) updateSet.userId = userId;
   if (notes !== void 0) updateSet.notes = notes;
-  await db.update(applications3).set(updateSet).where(eq(applications3.id, id));
+  await db.update(applications3).set(updateSet).where(eq2(applications3.id, id));
 }
 async function validateExternalApiToken(token) {
   const db = await getDb();
   if (!db) return false;
-  const result = await db.select().from(externalApiTokens3).where(and(eq(externalApiTokens3.token, token), eq(externalApiTokens3.isActive, "true"))).limit(1);
+  const result = await db.select().from(externalApiTokens3).where(and(eq2(externalApiTokens3.token, token), eq2(externalApiTokens3.isActive, "true"))).limit(1);
   return result.length > 0;
 }
 async function listExternalApiTokens() {
@@ -1489,7 +1615,7 @@ async function createExternalApiToken(name, token) {
 async function deleteExternalApiToken(id) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(externalApiTokens3).set({ isActive: "false" }).where(eq(externalApiTokens3.id, id));
+  await db.update(externalApiTokens3).set({ isActive: "false" }).where(eq2(externalApiTokens3.id, id));
 }
 async function createAnnouncement(data) {
   const db = await getDb();
@@ -1501,36 +1627,36 @@ async function listAnnouncements(activeOnly = false) {
   const db = await getDb();
   if (!db) return [];
   if (activeOnly) {
-    return db.select().from(announcements3).where(eq(announcements3.isActive, "true")).orderBy(desc(announcements3.createdAt));
+    return db.select().from(announcements3).where(eq2(announcements3.isActive, "true")).orderBy(desc(announcements3.createdAt));
   }
   return db.select().from(announcements3).orderBy(desc(announcements3.createdAt));
 }
 async function updateAnnouncement(id, data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(announcements3).set(data).where(eq(announcements3.id, id));
+  await db.update(announcements3).set(data).where(eq2(announcements3.id, id));
 }
 async function deleteAnnouncement(id) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.delete(announcements3).where(eq(announcements3.id, id));
+  await db.delete(announcements3).where(eq2(announcements3.id, id));
 }
 async function getUserByTelegramChatId(chatId) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(users3).where(eq(users3.telegramChatId, chatId)).orderBy(desc(users3.updatedAt)).limit(1);
+  const result = await db.select().from(users3).where(eq2(users3.telegramChatId, chatId)).orderBy(desc(users3.updatedAt)).limit(1);
   return result[0];
 }
 async function linkTelegramChat(userId, chatId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(users3).set({ telegramChatId: null }).where(eq(users3.telegramChatId, chatId));
-  await db.update(users3).set({ telegramChatId: chatId }).where(eq(users3.id, userId));
+  await db.update(users3).set({ telegramChatId: null }).where(eq2(users3.telegramChatId, chatId));
+  await db.update(users3).set({ telegramChatId: chatId }).where(eq2(users3.id, userId));
 }
 async function getActivationToken(token) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(botActivationTokens3).where(eq(botActivationTokens3.token, token)).limit(1);
+  const result = await db.select().from(botActivationTokens3).where(eq2(botActivationTokens3.token, token)).limit(1);
   return result[0];
 }
 async function createBotActivationToken(userId, token) {
@@ -1545,14 +1671,14 @@ async function createBotActivationToken(userId, token) {
     console.warn("[Database] bot_activation_tokens insert.returning failed, retrying:", err);
   }
   await database.insert(botActivationTokens3).values({ token, userId, isUsed: "false" });
-  const found = await database.select().from(botActivationTokens3).where(eq(botActivationTokens3.token, token)).limit(1);
+  const found = await database.select().from(botActivationTokens3).where(eq2(botActivationTokens3.token, token)).limit(1);
   if (!found[0]) throw new Error("Failed to create activation token");
   return found[0];
 }
 async function markActivationTokenUsed(tokenId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(botActivationTokens3).set({ isUsed: "true" }).where(eq(botActivationTokens3.id, tokenId));
+  await db.update(botActivationTokens3).set({ isUsed: "true" }).where(eq2(botActivationTokens3.id, tokenId));
 }
 function coerceTelegramMessageLimit(value) {
   if (value == null) return 0;
@@ -1588,7 +1714,7 @@ async function listRecentTelegramLlmTurnsForAdvisor(userId, advisor, maxMessages
     const rows = await db.select({
       role: telegramLlmTurns3.role,
       content: telegramLlmTurns3.content
-    }).from(telegramLlmTurns3).where(and(eq(telegramLlmTurns3.userId, userId), eq(telegramLlmTurns3.advisor, advisor))).orderBy(desc(telegramLlmTurns3.createdAt)).limit(cap);
+    }).from(telegramLlmTurns3).where(and(eq2(telegramLlmTurns3.userId, userId), eq2(telegramLlmTurns3.advisor, advisor))).orderBy(desc(telegramLlmTurns3.createdAt)).limit(cap);
     return rows.reverse().filter((r) => r.role === "user" || r.role === "assistant").map((r) => ({
       role: r.role,
       content: r.content
@@ -1619,7 +1745,7 @@ async function appendTelegramLlmTurnPair(userId, advisor, userContent, assistant
         createdAt: now
       }
     ]);
-    const ids = await db.select({ id: telegramLlmTurns3.id }).from(telegramLlmTurns3).where(and(eq(telegramLlmTurns3.userId, userId), eq(telegramLlmTurns3.advisor, advisor))).orderBy(desc(telegramLlmTurns3.createdAt));
+    const ids = await db.select({ id: telegramLlmTurns3.id }).from(telegramLlmTurns3).where(and(eq2(telegramLlmTurns3.userId, userId), eq2(telegramLlmTurns3.advisor, advisor))).orderBy(desc(telegramLlmTurns3.createdAt));
     const toDrop = ids.slice(MAX_TELEGRAM_LLM_TURNS);
     if (toDrop.length === 0) return;
     await db.delete(telegramLlmTurns3).where(
@@ -1704,7 +1830,7 @@ async function applyTelegramAdvisorPlan(userId, advisor, tier, planExpiryDate) {
     updateSet.founderMessageLimit = TELEGRAM_UNLIMITED_MESSAGE_LIMIT;
     updateSet.planTypeFounder = "pro";
   }
-  await db.update(users3).set(updateSet).where(eq(users3.id, userId));
+  await db.update(users3).set(updateSet).where(eq2(users3.id, userId));
 }
 async function updateTelegramUserPlan(input) {
   const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
@@ -1777,23 +1903,23 @@ async function updateTelegramUserPlan(input) {
     }
   }
   if (Object.keys(updateSet).length > 1) {
-    await db.update(users3).set(updateSet).where(eq(users3.id, input.userId));
+    await db.update(users3).set(updateSet).where(eq2(users3.id, input.userId));
   }
 }
 async function decrementTelegramMessageLimit(userId, isBiz) {
   const db = await assertDatabase();
   if (isBiz) {
     await db.update(users3).set({
-      bizMessageLimit: sql3`max(0, ${users3.bizMessageLimit} - 1)`,
-      bizMessagesUsed: sql3`${users3.bizMessagesUsed} + 1`,
+      bizMessageLimit: sql4`max(0, ${users3.bizMessageLimit} - 1)`,
+      bizMessagesUsed: sql4`${users3.bizMessagesUsed} + 1`,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq(users3.id, userId));
+    }).where(eq2(users3.id, userId));
   } else {
     await db.update(users3).set({
-      founderMessageLimit: sql3`max(0, ${users3.founderMessageLimit} - 1)`,
-      founderMessagesUsed: sql3`${users3.founderMessagesUsed} + 1`,
+      founderMessageLimit: sql4`max(0, ${users3.founderMessageLimit} - 1)`,
+      founderMessagesUsed: sql4`${users3.founderMessagesUsed} + 1`,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq(users3.id, userId));
+    }).where(eq2(users3.id, userId));
   }
 }
 var MAX_TELEGRAM_LLM_TURNS, MAX_TELEGRAM_TURN_CHARS;
@@ -1833,71 +1959,62 @@ var init_cookies = __esm({
   }
 });
 
+// shared/onboarding.ts
+function userNeedsOnboarding(user) {
+  if (!user) return false;
+  if (user.role === "admin") return false;
+  if (user.onboardingCompletedAt) return false;
+  const name = (user.name ?? "").trim();
+  const purpose = (user.useCase ?? "").trim();
+  return !name || !purpose;
+}
+var init_onboarding = __esm({
+  "shared/onboarding.ts"() {
+    "use strict";
+  }
+});
+
 // server/_core/googleLogin.ts
 async function resolveGoogleLogin(userInfo) {
   const googleSub = userInfo.sub;
   const userEmail = userInfo.email ? normalizeEmail(userInfo.email) : null;
-  const { user: existingUser, byOpenId, byEmail } = await resolveUserForGoogleLogin(
-    userEmail,
-    googleSub
-  );
-  let approvedApplication;
-  let latestApplication;
-  if (userEmail) {
-    try {
-      approvedApplication = await getApprovedApplicationByEmail(userEmail);
-      latestApplication = await getApplicationByEmail(userEmail);
-    } catch (dbErr) {
-      console.error("[Google OAuth] Application lookup failed (non-fatal):", dbErr);
-    }
-  }
-  const isOwner = Boolean(ENV.ownerGoogleSub && googleSub === ENV.ownerGoogleSub);
-  const isAdmin = Boolean(userEmail && isAdminEmail(userEmail));
-  const isApproved = isOwner || isAdmin || isUserApproved(existingUser) || Boolean(approvedApplication) || latestApplication?.status === "approved";
-  const userStatus = existingUser?.status ?? (isApproved ? "active" : latestApplication?.status === "approved" ? "active" : "pending");
+  const { user: existingUser } = await resolveUserForGoogleLogin(userEmail, googleSub);
   const grantAdmin = shouldGrantAdminRole({
     email: userEmail,
     googleSub,
     ownerGoogleSub: ENV.ownerGoogleSub
-  });
-  console.log("User Login Attempt:", userEmail, "Status:", userStatus, "Role:", grantAdmin ? "admin" : existingUser?.role ?? "user", {
-    matchedByOpenId: Boolean(byOpenId),
-    matchedByEmail: byEmail.length,
-    existingUserId: existingUser?.id,
-    isApproved
   });
   const upsert = {
     openId: googleSub,
     name: userInfo.name || existingUser?.name || null,
     email: userEmail ?? userInfo.email ?? existingUser?.email ?? null,
     loginMethod: "google",
-    lastSignedIn: /* @__PURE__ */ new Date()
+    lastSignedIn: /* @__PURE__ */ new Date(),
+    status: "active"
   };
   if (grantAdmin) {
     upsert.role = "admin";
-    upsert.status = "active";
-  } else if (!existingUser) {
-    upsert.status = isApproved ? "active" : "pending";
-  } else if (isApproved && !isApprovedUserStatus(existingUser.status)) {
+  }
+  if (existingUser && !isUserApproved(existingUser)) {
     upsert.status = "active";
   }
-  let redirectPath = "/app";
-  if (!isApproved) {
-    const hasExistingAccount = Boolean(existingUser || latestApplication);
-    const pendingUser = existingUser && isPendingUserStatus(existingUser.status);
-    const pendingApp = latestApplication?.status === "pending";
-    if (hasExistingAccount && (pendingUser || pendingApp)) {
-      redirectPath = `/login-required?reason=pending&email=${encodeURIComponent(userEmail ?? "")}`;
-    } else {
-      redirectPath = `/login-required?reason=not_approved&email=${encodeURIComponent(userEmail ?? "")}`;
-    }
-  }
+  const mergedProfile = {
+    name: upsert.name ?? existingUser?.name,
+    useCase: existingUser?.useCase,
+    role: grantAdmin ? "admin" : existingUser?.role,
+    onboardingCompletedAt: existingUser?.onboardingCompletedAt
+  };
+  const redirectPath = userNeedsOnboarding(mergedProfile) ? "/onboarding" : "/app";
+  console.info("User Login Attempt:", userEmail, "redirect:", redirectPath, {
+    existingUserId: existingUser?.id,
+    needsOnboarding: userNeedsOnboarding(mergedProfile)
+  });
   return {
     sessionOpenId: googleSub,
     redirectPath,
-    userStatus,
+    userStatus: "active",
     userEmail,
-    isApproved,
+    isApproved: true,
     upsert
   };
 }
@@ -1908,6 +2025,16 @@ var init_googleLogin = __esm({
     init_adminAccess();
     init_env();
     init_userStatus();
+    init_onboarding();
+  }
+});
+
+// shared/session.ts
+var SESSION_APP_ID;
+var init_session = __esm({
+  "shared/session.ts"() {
+    "use strict";
+    SESSION_APP_ID = "pilothub";
   }
 });
 
@@ -1935,6 +2062,7 @@ var init_sdk = __esm({
   "server/_core/sdk.ts"() {
     "use strict";
     init_const();
+    init_session();
     init_errors();
     init_db();
     init_adminAccess();
@@ -1960,7 +2088,7 @@ var init_sdk = __esm({
         return this.signSession(
           {
             openId,
-            appId: ENV.googleClientId,
+            appId: SESSION_APP_ID,
             name: options.name || ""
           },
           options
@@ -1992,11 +2120,18 @@ var init_sdk = __esm({
             console.warn("[Auth] Session payload missing required fields");
             return null;
           }
-          if (!ENV.googleClientId || appId !== ENV.googleClientId) {
-            console.warn("[Auth] Session appId does not match configured Google client");
+          const validAppIds = new Set(
+            [SESSION_APP_ID, ENV.googleClientId].filter((id) => Boolean(id))
+          );
+          if (!validAppIds.has(appId)) {
+            console.warn("[Auth] Session appId is not recognized");
             return null;
           }
-          return { openId, appId, name };
+          return {
+            openId,
+            appId,
+            name: isNonEmptyString(name) ? name : ""
+          };
         } catch (error) {
           console.warn("[Auth] Session verification failed", String(error));
           return null;
@@ -3434,6 +3569,7 @@ async function notifyOwner(payload) {
 
 // server/_core/trpc.ts
 init_const();
+init_onboarding();
 init_userStatus();
 import { initTRPC, TRPCError as TRPCError2 } from "@trpc/server";
 import superjson from "superjson";
@@ -3460,8 +3596,14 @@ var requireApproved = t.middleware(async (opts) => {
   if (!ctx.user) {
     throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
-  if (!isUserApproved(ctx.user) && isPendingUserStatus(ctx.user.status)) {
-    throw new TRPCError2({ code: "FORBIDDEN", message: "Your account is pending admin approval." });
+  if (!isUserApproved(ctx.user)) {
+    throw new TRPCError2({ code: "FORBIDDEN", message: "Your account is not active." });
+  }
+  if (userNeedsOnboarding(ctx.user)) {
+    throw new TRPCError2({
+      code: "FORBIDDEN",
+      message: "Please complete onboarding to continue."
+    });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
@@ -3577,25 +3719,43 @@ init_storage();
 
 // server/emailHelper.ts
 import nodemailer from "nodemailer";
-var PILOTHUB_ADMIN_NOTIFICATION_EMAIL = "chatpilot.mm@gmail.com";
-var PILOTHUB_LOGO_URL = "https://www.pilothub.vip/pilothub-logo.png";
+function htmlToPlainText(html) {
+  return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<\/div>/gi, "\n").replace(/<\/tr>/gi, "\n").replace(/<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\n{3,}/g, "\n\n").trim();
+}
 function wrapPilotHubEmailHtml(bodyHtml) {
   return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-<body style="font-family: 'Segoe UI', Arial, sans-serif; background: #0a1628; color: #e2e8f0; margin: 0; padding: 0;">
-  <div style="max-width: 600px; margin: 40px auto; background: #0f1f35; border-radius: 16px; overflow: hidden; border: 1px solid #1e3a5f;">
-    <div style="padding: 32px 40px 24px; text-align: center; border-bottom: 1px solid #1e3a5f; background: linear-gradient(135deg, #0f2a1e 0%, #0a1628 100%);">
-      <img src="${PILOTHUB_LOGO_URL}" alt="PilotHub Logo" style="height: 50px; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;" />
-      <p style="color: #64748b; font-size: 13px; margin: 0;">by ChatPilot</p>
-    </div>
-    <div style="padding: 32px 40px;">
-      ${bodyHtml}
-    </div>
-    <div style="padding: 20px 40px; border-top: 1px solid #1e3a5f; text-align: center;">
-      <p style="color: #334155; font-size: 12px; margin: 0;">Powered by ChatPilot \xB7 Myanmar Business AI Platform</p>
-    </div>
-  </div>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>PilotHub</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f1f5f9; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 32px 16px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; width: 100%; background-color: #ffffff; border-collapse: collapse; border-radius: 8px; border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="padding: 32px 40px 20px; text-align: center; border-bottom: 1px solid #e2e8f0; background-color: #ffffff;">
+              <h1 style="color: #0d9488; margin: 0; font-family: sans-serif;">PilotHub</h1>
+              <p style="color: #64748b; margin-top: 5px; font-size: 14px;">by ChatPilot</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 40px; color: #334155; font-size: 15px; line-height: 1.6;">
+              ${bodyHtml}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 20px 40px; border-top: 1px solid #e2e8f0; text-align: center; background-color: #f8fafc;">
+              <p style="color: #94a3b8; font-size: 12px; margin: 0;">Powered by ChatPilot \xB7 Myanmar Business AI Platform</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 }
@@ -3621,6 +3781,8 @@ async function sendEmail({
     return false;
   }
   const from = `"PilotHub Team" <${user}>`;
+  const htmlContent = html ?? "";
+  const textContent = text3 ?? (htmlContent ? htmlToPlainText(htmlContent) : "");
   try {
     const transporter = nodemailer.createTransport({
       service: "gmail",
@@ -3633,8 +3795,8 @@ async function sendEmail({
       from,
       to,
       subject,
-      text: text3,
-      html
+      text: textContent,
+      html: htmlContent || void 0
     });
     console.log(`[Email] Sent to ${to}: ${subject} (from ${user})`);
     return true;
@@ -3643,58 +3805,26 @@ async function sendEmail({
     return false;
   }
 }
-async function sendNewApplicationNotificationEmail(app2) {
-  const rows = [
-    ["Name", app2.fullName],
-    ["Email", app2.email],
-    ["Phone", app2.phone ?? "\u2014"],
-    ["Business", app2.businessName ?? "\u2014"],
-    ["Business Type", app2.businessType ?? "\u2014"],
-    ["Use Case", app2.useCase ?? "\u2014"],
-    ["Plan", app2.plan ?? "free"],
-    ["Source", app2.source ?? "website"],
-    ...app2.applicationId != null ? [["Application ID", String(app2.applicationId)]] : []
-  ];
-  const tableRows = rows.map(
-    ([label, value]) => `<tr>
-          <td style="padding: 8px 12px; color: #64748b; font-size: 13px; vertical-align: top; width: 140px;">${escapeHtml(label)}</td>
-          <td style="padding: 8px 12px; color: #f1f5f9; font-size: 14px;">${escapeHtml(value)}</td>
-        </tr>`
-  ).join("");
-  const bodyHtml = `
-    <h2 style="color: #f1f5f9; font-size: 20px; margin: 0 0 20px;">New application received</h2>
-    <table style="width: 100%; border-collapse: collapse; background: #0a1628; border-radius: 12px; border: 1px solid #1e3a5f;">
-      ${tableRows}
-    </table>
-    <p style="color: #475569; font-size: 13px; margin: 24px 0 0;">
-      Review in the <a href="https://www.pilothub.vip/admin/applications" style="color: #22c55e;">Admin Applications</a> panel.
-    </p>
-  `;
-  const plain = rows.map(([k, v]) => `${k}: ${v}`).join("\n");
-  return sendEmail({
-    to: PILOTHUB_ADMIN_NOTIFICATION_EMAIL,
-    subject: "New PilotHub Application Received!",
-    html: wrapPilotHubEmailHtml(bodyHtml),
-    text: `New PilotHub Application Received!
-
-${plain}`
-  });
-}
 async function sendBroadcastEmail({
   to,
   subject,
   message
 }) {
   const bodyHtml = `
-    <div style="color: #94a3b8; line-height: 1.7; font-size: 15px;">
+    <div style="color: #475569; line-height: 1.7; font-size: 15px;">
       ${textToEmailHtml(message)}
     </div>
   `;
+  const wrappedHtml = wrapPilotHubEmailHtml(bodyHtml);
   return sendEmail({
     to,
     subject,
-    html: wrapPilotHubEmailHtml(bodyHtml),
-    text: message
+    html: wrappedHtml,
+    text: `${subject}
+
+${message}
+
+\u2014 PilotHub by ChatPilot`
   });
 }
 async function sendApprovalEmail({
@@ -3705,36 +3835,42 @@ async function sendApprovalEmail({
 }) {
   const planName = plan === "bizpilot" ? "BizPilot" : plan === "founderpilot" ? "FounderPilot" : "Free Trial";
   const bodyHtml = `
-      <h2 style="color: #f1f5f9; font-size: 22px; margin: 0 0 16px;">\u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A, ${escapeHtml(name)}!</h2>
-      <p style="color: #94a3b8; line-height: 1.7; margin: 0 0 24px;">
+      <h2 style="color: #0f172a; font-size: 22px; margin: 0 0 16px; font-weight: 600;">\u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A, ${escapeHtml(name)}!</h2>
+      <p style="color: #475569; line-height: 1.7; margin: 0 0 24px;">
         \u101E\u1004\u103A\u104F PilotHub application \u1000\u102D\u102F approved \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
-        \u101A\u1001\u102F <strong style="color: #22c55e;">free plan</strong> \u1016\u103C\u1004\u1037\u103A \u1005\u1010\u1004\u103A\u1005\u1019\u103A\u1038\u101E\u1015\u103A\u1014\u102D\u102F\u1004\u103A\u1015\u103C\u102E\u1038 AI advisors \u1019\u103B\u102C\u1038\u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B
+        \u101A\u1001\u102F <strong style="color: #0d9488;">free plan</strong> \u1016\u103C\u1004\u1037\u103A \u1005\u1010\u1004\u103A\u1005\u1019\u103A\u1038\u101E\u1015\u103A\u1014\u102D\u102F\u1004\u103A\u1015\u103C\u102E\u1038 AI advisors \u1019\u103B\u102C\u1038\u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B
       </p>
-      <div style="text-align: center; margin: 32px 0;">
-        <p style="color: #22c55e; font-size: 16px; font-weight: 600; margin: 0;">${escapeHtml(loginUrl)} \u101E\u102D\u102F\u1037 \u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u102B</p>
-      </div>
-      <div style="background: #0a1628; border-radius: 12px; padding: 24px; border: 1px solid #1e3a5f;">
-        <p style="color: #64748b; font-size: 13px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 1px;">\u101B\u101B\u103E\u102D\u1019\u100A\u1037\u103A features (${escapeHtml(planName)})</p>
-        <ul style="color: #94a3b8; line-height: 2; margin: 0; padding-left: 20px;">
-          <li><strong style="color: #22c55e;">BizPilot AI</strong> \u2014 Business strategy & operations</li>
-          <li><strong style="color: #f59e0b;">FounderPilot AI</strong> \u2014 Founder & CEO advisory</li>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin: 24px 0;">
+        <tr>
+          <td align="center">
+            <a href="${escapeHtml(loginUrl)}" style="display: inline-block; padding: 14px 28px; background-color: #0d9488; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px; border-radius: 6px;">\u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u102B \u2192</a>
+          </td>
+        </tr>
+      </table>
+      <p style="color: #64748b; font-size: 13px; text-align: center; margin: 0 0 24px;">${escapeHtml(loginUrl)}</p>
+      <div style="background: #f8fafc; border-radius: 8px; padding: 24px; border: 1px solid #e2e8f0;">
+        <p style="color: #64748b; font-size: 13px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">\u101B\u101B\u103E\u102D\u1019\u100A\u1037\u103A features (${escapeHtml(planName)})</p>
+        <ul style="color: #475569; line-height: 2; margin: 0; padding-left: 20px;">
+          <li><strong style="color: #0d9488;">BizPilot AI</strong> \u2014 Business strategy &amp; operations</li>
+          <li><strong style="color: #d97706;">FounderPilot AI</strong> \u2014 Founder &amp; CEO advisory</li>
           <li>Myanmar business context \u1014\u102C\u1038\u101C\u100A\u103A\u101E\u1031\u102C AI</li>
         </ul>
       </div>
-      <p style="color: #475569; font-size: 13px; margin: 24px 0 0; text-align: center;">
-        \u1019\u1031\u1038\u1001\u103D\u1014\u103A\u1038\u1019\u103B\u102C\u1038\u101B\u103E\u102D\u1015\u102B\u1000 <a href="mailto:chatpilot.mm@gmail.com" style="color: #22c55e;">chatpilot.mm@gmail.com</a> \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B
+      <p style="color: #64748b; font-size: 13px; margin: 24px 0 0; text-align: center;">
+        \u1019\u1031\u1038\u1001\u103D\u1014\u103A\u1038\u1019\u103B\u102C\u1038\u101B\u103E\u102D\u1015\u102B\u1000 <a href="mailto:chatpilot.mm@gmail.com" style="color: #0d9488; text-decoration: none;">chatpilot.mm@gmail.com</a> \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B
       </p>
   `;
+  const wrappedHtml = wrapPilotHubEmailHtml(bodyHtml);
   return sendEmail({
     to,
-    subject: `\u2705 PilotHub Application Approved \u2014 \u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A ${name}!`,
-    html: wrapPilotHubEmailHtml(bodyHtml),
+    subject: `PilotHub Application Approved \u2014 \u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A ${name}!`,
+    html: wrappedHtml,
     text: `\u1000\u103C\u102D\u102F\u1006\u102D\u102F\u1015\u102B\u101E\u100A\u103A ${name}!
 
 \u101E\u1004\u103A\u104F PilotHub application \u1000\u102D\u102F approved \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
 free plan \u1016\u103C\u1004\u1037\u103A \u1005\u1010\u1004\u103A\u1005\u1019\u103A\u1038\u101E\u1015\u103A\u1014\u102D\u102F\u1004\u103A\u1015\u103C\u102E\u1038 AI advisors \u1019\u103B\u102C\u1038\u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B
 
-${loginUrl} \u101E\u102D\u102F\u1037 \u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u102B
+\u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u102B: ${loginUrl}
 
 Powered by ChatPilot`
   });
@@ -3746,16 +3882,17 @@ async function sendPaymentConfirmationEmail({
 }) {
   const planName = plan === "bizpilot" ? "BizPilot" : plan === "founderpilot" ? "FounderPilot" : plan;
   const bodyHtml = `
-      <h2 style="color: #f1f5f9; font-size: 22px; margin: 0 0 16px;">\u{1F4B3} Payment Confirmed!</h2>
-      <p style="color: #94a3b8; line-height: 1.7;">
-        ${escapeHtml(name)} \u104F <strong style="color: #22c55e;">${escapeHtml(planName)}</strong> plan payment \u1000\u102D\u102F confirmed \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
+      <h2 style="color: #0f172a; font-size: 22px; margin: 0 0 16px; font-weight: 600;">Payment Confirmed</h2>
+      <p style="color: #475569; line-height: 1.7; margin: 0;">
+        ${escapeHtml(name)} \u104F <strong style="color: #0d9488;">${escapeHtml(planName)}</strong> plan payment \u1000\u102D\u102F confirmed \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
         Subscription \u1000\u102D\u102F activate \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
       </p>
   `;
+  const wrappedHtml = wrapPilotHubEmailHtml(bodyHtml);
   return sendEmail({
     to,
-    subject: `\u2705 PilotHub Payment Confirmed \u2014 ${planName} Plan`,
-    html: wrapPilotHubEmailHtml(bodyHtml),
+    subject: `PilotHub Payment Confirmed \u2014 ${planName} Plan`,
+    html: wrappedHtml,
     text: `${name} \u104F ${planName} plan payment \u1000\u102D\u102F confirmed \u1015\u103C\u102F\u101C\u102F\u1015\u103A\u1015\u103C\u102E\u1038\u1015\u102B\u1015\u103C\u102E\u104B
 
 Powered by ChatPilot`
@@ -3764,6 +3901,48 @@ Powered by ChatPilot`
 
 // server/routers.ts
 init_adminAccess();
+
+// server/_core/passwordAuth.ts
+import { randomBytes as randomBytes2, scrypt, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { promisify } from "node:util";
+var scryptAsync = promisify(scrypt);
+var SCRYPT_KEYLEN = 64;
+async function hashPassword(password) {
+  const salt = randomBytes2(16).toString("hex");
+  const derived = await scryptAsync(password, salt, SCRYPT_KEYLEN);
+  return `scrypt:${salt}:${derived.toString("hex")}`;
+}
+async function verifyPassword(password, stored) {
+  if (!stored.startsWith("scrypt:")) return false;
+  const parts = stored.split(":");
+  if (parts.length !== 3) return false;
+  const salt = parts[1];
+  const expectedHex = parts[2];
+  const derived = await scryptAsync(password, salt, SCRYPT_KEYLEN);
+  try {
+    const a = Buffer.from(expectedHex, "hex");
+    const b = derived;
+    return a.length === b.length && timingSafeEqual2(a, b);
+  } catch {
+    return false;
+  }
+}
+
+// server/_core/sessionCookie.ts
+init_const();
+init_cookies();
+init_sdk();
+async function setUserSessionCookie(req, res, openId, name) {
+  const sessionToken = await sdk.createSessionToken(openId, {
+    name,
+    expiresInMs: ONE_YEAR_MS
+  });
+  const cookieOptions = getSessionCookieOptions(req);
+  res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+}
+
+// server/routers.ts
+init_onboarding();
 var COOKIE_NAME2 = "app_session_id";
 async function requireAdmin(ctx) {
   const hasAdminCookie = ctx.req.cookies?.admin_session === "authenticated";
@@ -3796,6 +3975,89 @@ var appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
+    register: publicProcedure.input(
+      z2.object({
+        email: z2.string().email(),
+        password: z2.string().min(8, "Password must be at least 8 characters"),
+        name: z2.string().min(1).optional()
+      })
+    ).mutation(async ({ ctx, input }) => {
+      await assertDatabase();
+      const normalizedEmail = normalizeEmail(input.email);
+      const existing = await getUserByEmail(normalizedEmail);
+      if (existing) {
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "An account with this email already exists. Please sign in."
+        });
+      }
+      const passwordHash = await hashPassword(input.password);
+      const { openId } = await createEmailPasswordUser({
+        email: normalizedEmail,
+        passwordHash,
+        name: input.name
+      });
+      await setUserSessionCookie(ctx.req, ctx.res, openId, input.name ?? normalizedEmail);
+      return {
+        success: true,
+        redirectTo: "/onboarding",
+        needsOnboarding: true
+      };
+    }),
+    login: publicProcedure.input(
+      z2.object({
+        email: z2.string().email(),
+        password: z2.string().min(1)
+      })
+    ).mutation(async ({ ctx, input }) => {
+      await assertDatabase();
+      const normalizedEmail = normalizeEmail(input.email);
+      const user = await getUserByEmail(normalizedEmail);
+      if (!user) {
+        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Invalid email or password." });
+      }
+      const storedHash = user.passwordHash;
+      if (!storedHash) {
+        throw new TRPCError3({
+          code: "UNAUTHORIZED",
+          message: "This account uses Google sign-in. Continue with Google instead."
+        });
+      }
+      const valid = await verifyPassword(input.password, storedHash);
+      if (!valid) {
+        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Invalid email or password." });
+      }
+      await upsertUser({
+        openId: user.openId,
+        email: user.email,
+        lastSignedIn: /* @__PURE__ */ new Date(),
+        status: "active"
+      });
+      await setUserSessionCookie(
+        ctx.req,
+        ctx.res,
+        user.openId,
+        user.name ?? user.email ?? "User"
+      );
+      const needsOnboarding = userNeedsOnboarding(user);
+      return {
+        success: true,
+        redirectTo: needsOnboarding ? "/onboarding" : "/app",
+        needsOnboarding
+      };
+    }),
+    completeOnboarding: protectedProcedure.input(
+      z2.object({
+        name: z2.string().min(1, "Name is required"),
+        useCase: z2.string().min(1, "Purpose is required")
+      })
+    ).mutation(async ({ ctx, input }) => {
+      await completeUserOnboarding(ctx.user.id, {
+        name: input.name,
+        useCase: input.useCase
+      });
+      return { success: true, redirectTo: "/app" };
+    }),
     updateProfile: protectedProcedure.input(z2.object({
       name: z2.string().min(1).optional(),
       phone: z2.string().optional(),
@@ -3812,88 +4074,6 @@ var appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME2, { ...cookieOptions, maxAge: -1 });
       return { success: true };
-    })
-  }),
-  // ── Application submission (public, no login required) ──
-  applications: router({
-    submit: publicProcedure.input(z2.object({
-      fullName: z2.string().min(1),
-      email: z2.string().email(),
-      phone: z2.string().optional(),
-      businessName: z2.string().optional(),
-      businessType: z2.string().optional(),
-      useCase: z2.string().optional(),
-      plan: z2.enum(["bizpilot", "founderpilot", "free"]).optional().default("free")
-    })).mutation(async ({ input }) => {
-      const normalizedEmail = normalizeEmail(input.email);
-      const existingUser = await getUserByEmail(normalizedEmail);
-      if (existingUser) {
-        if (existingUser.status === "active") {
-          throw new TRPCError3({
-            code: "CONFLICT",
-            message: "An account with this email already exists. Please sign in with Google."
-          });
-        }
-        throw new TRPCError3({
-          code: "CONFLICT",
-          message: "Your application is already on file. Please wait for admin approval, then sign in with Google."
-        });
-      }
-      const existingApplication = await getApplicationByEmail(normalizedEmail);
-      if (existingApplication) {
-        if (existingApplication.status === "approved") {
-          throw new TRPCError3({
-            code: "CONFLICT",
-            message: "This email is already approved. Please sign in with Google."
-          });
-        }
-        if (existingApplication.status === "pending") {
-          throw new TRPCError3({
-            code: "CONFLICT",
-            message: "An application with this email is already pending review. Please wait for admin approval."
-          });
-        }
-        throw new TRPCError3({
-          code: "CONFLICT",
-          message: "An application with this email was already reviewed. Contact support if you need access."
-        });
-      }
-      const app2 = await createApplication({
-        fullName: input.fullName,
-        email: normalizedEmail,
-        phone: input.phone,
-        businessName: input.businessName,
-        businessType: input.businessType,
-        useCase: input.useCase,
-        plan: input.plan,
-        source: "website"
-      });
-      try {
-        await sendNewApplicationNotificationEmail({
-          fullName: input.fullName,
-          email: normalizedEmail,
-          phone: input.phone,
-          businessName: input.businessName,
-          businessType: input.businessType,
-          useCase: input.useCase,
-          plan: input.plan,
-          source: "website",
-          applicationId: app2.id
-        });
-      } catch (e) {
-        console.error("[applications.submit] Application notification email failed:", e);
-      }
-      try {
-        await notifyOwner({
-          title: `\u{1F4CB} New Application: ${input.fullName}`,
-          content: `New application from ${input.fullName} (${input.email})
-Plan: ${input.plan}
-Business: ${input.businessName ?? "N/A"}
-Use case: ${input.useCase ?? "N/A"}`
-        });
-      } catch (e) {
-      }
-      return { success: true, applicationId: app2.id };
     })
   }),
   // ── AI chat and conversation routers ──
@@ -4141,20 +4321,15 @@ Ref: ${input.transactionRef ?? "N/A"}`
         await setSystemSetting(input.key, input.value);
         return { success: true };
       }),
-      // Upload QR code image (supports per-method: kbzpay, wavepay, ayapay)
+      // Save payment QR as base64 data URL in system_settings (no external storage)
       uploadQr: publicProcedure.input(z2.object({
-        filename: z2.string(),
-        contentType: z2.string(),
-        dataBase64: z2.string(),
+        qrDataUrl: z2.string().min(1).refine((s) => s.startsWith("data:image/"), "QR must be a data:image/... URL"),
         method: z2.enum(["kbzpay", "wavepay", "ayapay", "default"]).optional().default("default")
       })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
-        const buffer = Buffer.from(input.dataBase64, "base64");
-        const key = `payment-qr/${input.method}-${Date.now()}-${input.filename}`;
-        const { url } = await storagePut(key, buffer, input.contentType);
         const settingKey = input.method === "default" ? "payment_qr_url" : `${input.method}_qr_url`;
-        await setSystemSetting(settingKey, url);
-        return { success: true, url };
+        await setSystemSetting(settingKey, input.qrDataUrl);
+        return { success: true, url: input.qrDataUrl };
       })
     }),
     // ── Applications management ──
@@ -4727,96 +4902,10 @@ function registerPublicApiRoutes(app2) {
   });
   app2.post("/api/public/applications/submit", async (req, res) => {
     if (!await requireApiKey(req, res)) return;
-    try {
-      const {
-        fullName,
-        email,
-        phone,
-        businessName,
-        businessType,
-        useCase,
-        plan,
-        paymentMethod,
-        transactionRef,
-        screenshotBase64,
-        screenshotMime
-      } = req.body;
-      if (!fullName || !email) {
-        res.status(400).json({ success: false, error: "fullName and email are required" });
-        return;
-      }
-      const validPlan = plan === "founderpilot" ? "founderpilot" : "bizpilot";
-      const app_ = await createApplication({
-        fullName,
-        email,
-        phone,
-        businessName,
-        businessType,
-        useCase,
-        plan: validPlan,
-        source: "external_api"
-      });
-      let paymentId;
-      if (paymentMethod) {
-        let screenshotUrl;
-        if (screenshotBase64) {
-          try {
-            const { storagePut: storagePut2 } = await Promise.resolve().then(() => (init_storage(), storage_exports));
-            const buffer = Buffer.from(screenshotBase64, "base64");
-            const ext = screenshotMime?.includes("png") ? "png" : "jpg";
-            const key = `payment-screenshots/ext-${Date.now()}-${nanoid3(8)}.${ext}`;
-            const result = await storagePut2(key, buffer, screenshotMime || "image/jpeg");
-            screenshotUrl = result.url;
-          } catch (e) {
-            console.warn("[PublicAPI] Screenshot upload failed:", e);
-          }
-        }
-        const amounts = { bizpilot: 1e5, founderpilot: 3e5 };
-        const payment = await createPayment({
-          userName: fullName,
-          userEmail: email,
-          plan: validPlan,
-          amount: amounts[validPlan] ?? 0,
-          paymentMethod,
-          transactionRef,
-          screenshotUrl,
-          source: "external_api"
-        });
-        paymentId = payment.id;
-      }
-      try {
-        await sendNewApplicationNotificationEmail({
-          fullName,
-          email,
-          phone,
-          businessName,
-          businessType,
-          useCase,
-          plan: validPlan,
-          source: "external_api",
-          applicationId: app_.id
-        });
-      } catch (e) {
-        console.error("[PublicAPI] Application notification email failed:", e);
-      }
-      try {
-        await notifyOwner({
-          title: `\u{1F4CB} External Application: ${fullName} (${validPlan})`,
-          content: `New application from external website:
-Name: ${fullName}
-Email: ${email}
-Plan: ${validPlan}
-Business: ${businessName ?? "N/A"}
-Payment: ${paymentMethod ?? "Not submitted"}
-Ref: ${transactionRef ?? "N/A"}`
-        });
-      } catch (e) {
-      }
-      res.json({ success: true, applicationId: app_.id, paymentId });
-    } catch (err) {
-      console.error("[PublicAPI] /applications/submit error:", err);
-      res.status(500).json({ success: false, error: "Internal server error" });
-    }
+    res.status(410).json({
+      success: false,
+      error: "The application waitlist API has been removed. Direct users to https://www.pilothub.vip/sign-up instead."
+    });
   });
   app2.post("/api/public/users/create", async (req, res) => {
     if (!await requireApiKey(req, res)) return;

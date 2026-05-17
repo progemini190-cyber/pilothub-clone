@@ -50,50 +50,56 @@ export default function AdminPayments() {
   const [showSettings, setShowSettings] = useState(false);
   const [activeMethodTab, setActiveMethodTab] = useState<"kbzpay" | "wavepay" | "ayapay">("kbzpay");
   // Per-method state
-  const [methodState, setMethodState] = useState<Record<string, { phone: string; name: string; qrFile: File | null; qrPreview: string | null }>>(
-    { kbzpay: { phone: "", name: "", qrFile: null, qrPreview: null }, wavepay: { phone: "", name: "", qrFile: null, qrPreview: null }, ayapay: { phone: "", name: "", qrFile: null, qrPreview: null } }
+  const [methodState, setMethodState] = useState<Record<string, { phone: string; name: string; qrPreview: string | null }>>(
+    { kbzpay: { phone: "", name: "", qrPreview: null }, wavepay: { phone: "", name: "", qrPreview: null }, ayapay: { phone: "", name: "", qrPreview: null } }
   );
+  const [savingSettings, setSavingSettings] = useState(false);
   const kbzQrRef = useRef<HTMLInputElement>(null);
   const waveQrRef = useRef<HTMLInputElement>(null);
   const ayaQrRef = useRef<HTMLInputElement>(null);
   const qrRefs: Record<string, React.RefObject<HTMLInputElement | null>> = { kbzpay: kbzQrRef, wavepay: waveQrRef, ayapay: ayaQrRef };
 
   const { data: settingsData, refetch: refetchSettings } = trpc.payments.settings.useQuery();
-  const setSystemSetting = trpc.admin.settings.set.useMutation({
-    onSuccess: () => { refetchSettings(); toast.success("Settings saved"); },
-    onError: (err: { message?: string }) => toast.error(err.message || "Failed to save"),
-  });
-  const uploadQr = trpc.admin.settings.uploadQr.useMutation({
-    onSuccess: () => { refetchSettings(); toast.success("QR code uploaded"); },
-    onError: (err: { message?: string }) => toast.error(err.message || "Failed to upload QR"),
-  });
+  const setSystemSetting = trpc.admin.settings.set.useMutation();
+  const uploadQr = trpc.admin.settings.uploadQr.useMutation();
   const handleQrFileChange = (method: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => setMethodState(prev => ({ ...prev, [method]: { ...prev[method], qrFile: file, qrPreview: ev.target?.result as string } }));
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result;
+      if (typeof dataUrl === "string") {
+        setMethodState(prev => ({ ...prev, [method]: { ...prev[method], qrPreview: dataUrl } }));
+      }
+    };
     reader.readAsDataURL(file);
+    e.target.value = "";
   };
   const handleSaveMethodSettings = async (method: "kbzpay" | "wavepay" | "ayapay") => {
     const ms = methodState[method];
-    if (ms.phone.trim()) await setSystemSetting.mutateAsync({ key: `${method}_phone`, value: ms.phone.trim() });
-    if (ms.name.trim()) await setSystemSetting.mutateAsync({ key: `${method}_name`, value: ms.name.trim() });
-    if (ms.qrFile) {
-      const arrayBuffer = await ms.qrFile.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      let binary = "";
-      for (let i = 0; i < uint8Array.length; i++) binary += String.fromCharCode(uint8Array[i]);
-      const base64 = btoa(binary);
-      await uploadQr.mutateAsync({ filename: ms.qrFile.name, contentType: ms.qrFile.type, dataBase64: base64, method });
-      setMethodState(prev => ({ ...prev, [method]: { ...prev[method], qrFile: null, qrPreview: null } }));
+    setSavingSettings(true);
+    try {
+      await setSystemSetting.mutateAsync({ key: `${method}_phone`, value: ms.phone.trim() });
+      await setSystemSetting.mutateAsync({ key: `${method}_name`, value: ms.name.trim() });
+      if (ms.qrPreview?.startsWith("data:image/")) {
+        await uploadQr.mutateAsync({ qrDataUrl: ms.qrPreview, method });
+      }
+      const updated = await refetchSettings();
+      initMethodState(updated.data);
+      toast.success("Settings saved");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to save settings";
+      toast.error(message);
+    } finally {
+      setSavingSettings(false);
     }
   };
   const initMethodState = (sd: typeof settingsData) => {
     if (!sd) return;
     setMethodState({
-      kbzpay: { phone: sd.kbzpay?.phone ?? "", name: sd.kbzpay?.name ?? "", qrFile: null, qrPreview: null },
-      wavepay: { phone: sd.wavepay?.phone ?? "", name: sd.wavepay?.name ?? "", qrFile: null, qrPreview: null },
-      ayapay: { phone: sd.ayapay?.phone ?? "", name: sd.ayapay?.name ?? "", qrFile: null, qrPreview: null },
+      kbzpay: { phone: sd.kbzpay?.phone ?? "", name: sd.kbzpay?.name ?? "", qrPreview: sd.kbzpay?.qrUrl ?? null },
+      wavepay: { phone: sd.wavepay?.phone ?? "", name: sd.wavepay?.name ?? "", qrPreview: sd.wavepay?.qrUrl ?? null },
+      ayapay: { phone: sd.ayapay?.phone ?? "", name: sd.ayapay?.name ?? "", qrPreview: sd.ayapay?.qrUrl ?? null },
     });
   };
 
@@ -221,6 +227,7 @@ export default function AdminPayments() {
           ];
           const cur = settingsData?.[activeMethodTab];
           const ms = methodState[activeMethodTab];
+          const displayQr = ms?.qrPreview ?? cur?.qrUrl ?? null;
           return (
             <div className="rounded-2xl p-6 space-y-5" style={{ background: "oklch(15% 0.04 220)", border: "1px solid oklch(72% 0.18 162 / 0.2)" }}>
               <h3 className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>💳 Payment Settings</h3>
@@ -272,9 +279,9 @@ export default function AdminPayments() {
                 <label className="block text-xs font-semibold mb-2" style={{ color: "oklch(60% 0.03 220)" }}>QR Code Image</label>
                 <div onClick={() => qrRefs[activeMethodTab]?.current?.click()}
                   className="rounded-xl p-4 text-center cursor-pointer transition"
-                  style={{ background: "oklch(18% 0.04 220)", border: `2px dashed ${ms?.qrPreview ? "oklch(72% 0.18 162)" : "oklch(30% 0.04 220)"}` }}>
-                  {ms?.qrPreview ? (
-                    <img src={ms.qrPreview} alt="QR Preview" className="w-32 h-32 mx-auto rounded-lg" style={{ background: "white", padding: "4px" }} />
+                  style={{ background: "oklch(18% 0.04 220)", border: `2px dashed ${displayQr ? "oklch(72% 0.18 162)" : "oklch(30% 0.04 220)"}` }}>
+                  {displayQr ? (
+                    <img src={displayQr} alt="QR Preview" className="w-32 h-32 mx-auto rounded-lg object-contain" style={{ background: "white", padding: "4px" }} />
                   ) : (
                     <div>
                       <Upload className="w-6 h-6 mx-auto mb-1" style={{ color: "oklch(45% 0.03 220)" }} />
@@ -285,10 +292,10 @@ export default function AdminPayments() {
                 </div>
               </div>
               <button onClick={() => handleSaveMethodSettings(activeMethodTab)}
-                disabled={setSystemSetting.isPending || uploadQr.isPending}
+                disabled={savingSettings}
                 className="px-6 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2"
-                style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)", opacity: (setSystemSetting.isPending || uploadQr.isPending) ? 0.7 : 1 }}>
-                {(setSystemSetting.isPending || uploadQr.isPending) ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)", opacity: savingSettings ? 0.7 : 1 }}>
+                {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Save {METHODS.find(m => m.id === activeMethodTab)?.label} Settings
               </button>
             </div>
