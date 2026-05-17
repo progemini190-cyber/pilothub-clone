@@ -15,7 +15,6 @@ import type { Express, Request, Response } from "express";
 import * as db from "./db";
 import { nanoid } from "nanoid";
 import { notifyOwner } from "./_core/notification";
-import { sendNewApplicationNotificationEmail } from "./emailHelper";
 import { generateTelegramActivationToken } from "./telegram";
 import { quickCreateTelegramUser, parsePlanType } from "./quickCreateUser";
 import { parseTelegramPlanTier } from "@shared/telegramPlans";
@@ -98,86 +97,11 @@ export function registerPublicApiRoutes(app: Express) {
   // Returns: { success, applicationId, paymentId? }
   app.post("/api/public/applications/submit", async (req: Request, res: Response) => {
     if (!await requireApiKey(req, res)) return;
-    try {
-      const {
-        fullName, email, phone, businessName, businessType, useCase,
-        plan, paymentMethod, transactionRef, screenshotBase64, screenshotMime,
-      } = req.body as {
-        fullName?: string; email?: string; phone?: string;
-        businessName?: string; businessType?: string; useCase?: string;
-        plan?: string; paymentMethod?: string; transactionRef?: string;
-        screenshotBase64?: string; screenshotMime?: string;
-      };
-
-      if (!fullName || !email) {
-        res.status(400).json({ success: false, error: "fullName and email are required" });
-        return;
-      }
-
-      const validPlan = (plan === "founderpilot") ? "founderpilot" : "bizpilot";
-
-      // Create application
-      const app_ = await db.createApplication({
-        fullName, email, phone, businessName, businessType, useCase,
-        plan: validPlan, source: "external_api",
-      });
-
-      let paymentId: number | undefined;
-
-      // If payment info provided, create payment record
-      if (paymentMethod) {
-        let screenshotUrl: string | undefined;
-        // Upload screenshot if provided
-        if (screenshotBase64) {
-          try {
-            const { storagePut } = await import("./storage");
-            const buffer = Buffer.from(screenshotBase64, "base64");
-            const ext = screenshotMime?.includes("png") ? "png" : "jpg";
-            const key = `payment-screenshots/ext-${Date.now()}-${nanoid(8)}.${ext}`;
-            const result = await storagePut(key, buffer, screenshotMime || "image/jpeg");
-            screenshotUrl = result.url;
-          } catch (e) {
-            console.warn("[PublicAPI] Screenshot upload failed:", e);
-          }
-        }
-
-        const amounts: Record<string, number> = { bizpilot: 100000, founderpilot: 300000 };
-        const payment = await db.createPayment({
-          userName: fullName, userEmail: email, plan: validPlan,
-          amount: amounts[validPlan] ?? 0, paymentMethod, transactionRef,
-          screenshotUrl, source: "external_api",
-        });
-        paymentId = payment.id;
-      }
-
-      try {
-        await sendNewApplicationNotificationEmail({
-          fullName,
-          email,
-          phone,
-          businessName,
-          businessType,
-          useCase,
-          plan: validPlan,
-          source: "external_api",
-          applicationId: app_.id,
-        });
-      } catch (e) {
-        console.error("[PublicAPI] Application notification email failed:", e);
-      }
-
-      try {
-        await notifyOwner({
-          title: `📋 External Application: ${fullName} (${validPlan})`,
-          content: `New application from external website:\nName: ${fullName}\nEmail: ${email}\nPlan: ${validPlan}\nBusiness: ${businessName ?? "N/A"}\nPayment: ${paymentMethod ?? "Not submitted"}\nRef: ${transactionRef ?? "N/A"}`,
-        });
-      } catch (e) { /* non-blocking */ }
-
-      res.json({ success: true, applicationId: app_.id, paymentId });
-    } catch (err: unknown) {
-      console.error("[PublicAPI] /applications/submit error:", err);
-      res.status(500).json({ success: false, error: "Internal server error" });
-    }
+    res.status(410).json({
+      success: false,
+      error:
+        "The application waitlist API has been removed. Direct users to https://www.pilothub.vip/sign-up instead.",
+    });
   });
 
   // ── POST /api/public/users/create ──────────────────────────────────────────

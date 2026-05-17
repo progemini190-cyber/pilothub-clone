@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { getLoginUrl } from "@/const";
-import { GoogleSignInButton } from "@/components/GoogleSignInButton";
+import { getLoginUrl, getSignUpUrl } from "@/const";
 import { Check, Zap, Star, Crown, Lock, Menu, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
@@ -73,7 +72,7 @@ export default function Pricing() {
         </div>
         <div className="hidden md:flex items-center gap-4 lg:gap-6 flex-shrink-0">
           <button type="button" onClick={() => setLocation("/pricing")} className="text-sm font-medium text-white">Pricing</button>
-          <button type="button" onClick={() => setLocation("/apply")} className="text-sm font-medium transition" style={{ color: "oklch(60% 0.03 220)" }}>Apply</button>
+          <button type="button" onClick={() => setLocation("/sign-in")} className="text-sm font-medium transition" style={{ color: "oklch(60% 0.03 220)" }}>Sign In</button>
           {isAuthenticated ? (
             <button type="button" onClick={() => setLocation("/app")}
               className="px-4 py-2 rounded-lg text-sm font-semibold"
@@ -81,7 +80,14 @@ export default function Pricing() {
               Dashboard
             </button>
           ) : (
-            <GoogleSignInButton size="compact" className="!shadow-none" />
+            <button
+              type="button"
+              onClick={() => setLocation(getSignUpUrl())}
+              className="px-4 py-2 rounded-lg text-sm font-semibold"
+              style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}
+            >
+              Sign Up
+            </button>
           )}
         </div>
         <div className="flex md:hidden items-center gap-2 flex-shrink-0">
@@ -92,7 +98,14 @@ export default function Pricing() {
               Dashboard
             </button>
           ) : (
-            <GoogleSignInButton size="compact" className="!px-2.5 !py-1.5 !text-xs !shadow-none" />
+            <button
+              type="button"
+              onClick={() => setLocation(getSignUpUrl())}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
+              style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}
+            >
+              Sign Up
+            </button>
           )}
           <button
             type="button"
@@ -114,10 +127,10 @@ export default function Pricing() {
             Pricing
           </button>
           <button type="button"
-            onClick={() => { setLocation("/apply"); setMobileMenuOpen(false); }}
+            onClick={() => { setLocation("/sign-up"); setMobileMenuOpen(false); }}
             className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium"
             style={{ background: "oklch(18% 0.05 220)", color: "oklch(75% 0.03 220)", border: "1px solid oklch(25% 0.04 220)" }}>
-            Apply
+            Sign Up
           </button>
           <button type="button"
             onClick={() => { setLocation("/"); setMobileMenuOpen(false); }}

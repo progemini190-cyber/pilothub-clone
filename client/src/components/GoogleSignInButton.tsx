@@ -1,4 +1,4 @@
-import { getLoginUrl } from "@/const";
+import { getGoogleAuthUrl } from "@/const";
 import { cn } from "@/lib/utils";
 
 type GoogleSignInButtonProps = {
@@ -36,7 +36,7 @@ export function GoogleSignInButton({ className, size = "default" }: GoogleSignIn
 
   return (
     <a
-      href={getLoginUrl()}
+      href={getGoogleAuthUrl()}
       className={cn(
         "inline-flex items-center justify-center gap-3 rounded-xl font-semibold tracking-tight transition",
         "bg-white text-zinc-800 shadow-sm ring-1 ring-zinc-200/80",

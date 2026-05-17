@@ -29,7 +29,7 @@ export default function FounderPilot() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) setLocation("/");
+    if (!authLoading && !isAuthenticated) setLocation("/sign-in");
   }, [authLoading, isAuthenticated]);
 
   useEffect(() => {

@@ -588,6 +588,56 @@ export async function updateUserProfile(userId: number, data: { name?: string; p
   }
 }
 
+export async function completeUserOnboarding(
+  userId: number,
+  data: { name: string; useCase: string },
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const now = new Date();
+  await db
+    .update(users)
+    .set({
+      name: data.name.trim(),
+      useCase: data.useCase.trim(),
+      status: "active",
+      onboardingCompletedAt: now,
+      updatedAt: now,
+    } as never)
+    .where(eq(users.id, userId));
+}
+
+export async function createEmailPasswordUser(input: {
+  email: string;
+  passwordHash: string;
+  name?: string;
+}): Promise<{ openId: string }> {
+  const { nanoid } = await import("nanoid");
+  const db = await assertDatabase();
+  const normalized = normalizeEmail(input.email);
+  const openId = `email_${nanoid(24)}`;
+  const now = new Date();
+
+  await db.insert(users).values({
+    openId,
+    email: normalized,
+    name: input.name?.trim() || null,
+    passwordHash: input.passwordHash,
+    loginMethod: "email",
+    role: "user",
+    status: "active",
+    plan: "free",
+    lastSignedIn: now,
+  } as never);
+
+  return { openId };
+}
+
+export async function setUserPasswordHash(userId: number, passwordHash: string): Promise<void> {
+  const db = await assertDatabase();
+  await db.update(users).set({ passwordHash } as never).where(eq(users.id, userId));
+}
+
 export async function updateUserSubscription(userId: number, plan: string, status: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

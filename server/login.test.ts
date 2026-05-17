@@ -25,7 +25,7 @@ describe("resolveGoogleLogin", () => {
     (db.getApplicationByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   });
 
-  it("redirects to /app when user status is active", async () => {
+  it("redirects to /app when profile is complete", async () => {
     (db.resolveUserForGoogleLogin as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: {
         id: 1,
@@ -33,6 +33,9 @@ describe("resolveGoogleLogin", () => {
         email: "approved@gmail.com",
         status: "active",
         role: "user",
+        name: "Approved User",
+        useCase: "Business planning",
+        onboardingCompletedAt: new Date(),
       },
       byOpenId: { id: 1 },
       byEmail: [],
@@ -46,17 +49,18 @@ describe("resolveGoogleLogin", () => {
 
     expect(result.redirectPath).toBe("/app");
     expect(result.isApproved).toBe(true);
-    expect(result.upsert.status).toBeUndefined();
+    expect(result.upsert.status).toBe("active");
   });
 
-  it("redirects to /app for legacy APPROVED status", async () => {
+  it("redirects to /onboarding when name or purpose is missing", async () => {
     (db.resolveUserForGoogleLogin as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: {
         id: 5,
-        openId: "app_legacy",
+        openId: googleSub,
         email: "legacy@gmail.com",
         status: "APPROVED",
         role: "user",
+        name: "Legacy User",
       },
       byOpenId: undefined,
       byEmail: [{ id: 5, status: "APPROVED" }],
@@ -67,11 +71,11 @@ describe("resolveGoogleLogin", () => {
       email: "legacy@gmail.com",
     });
 
-    expect(result.redirectPath).toBe("/app");
+    expect(result.redirectPath).toBe("/onboarding");
     expect(result.isApproved).toBe(true);
   });
 
-  it("redirects to pending screen when user exists with pending status", async () => {
+  it("activates pending users and sends them to onboarding", async () => {
     (db.resolveUserForGoogleLogin as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: {
         id: 2,
@@ -83,19 +87,15 @@ describe("resolveGoogleLogin", () => {
       byOpenId: { id: 2 },
       byEmail: [],
     });
-    (db.getApplicationByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
-      id: 10,
-      email: "pending@gmail.com",
-      status: "pending",
-    });
 
     const result = await resolveGoogleLogin({
       sub: googleSub,
       email: "pending@gmail.com",
     });
 
-    expect(result.redirectPath).toBe("/login-required?reason=pending&email=pending%40gmail.com");
-    expect(result.isApproved).toBe(false);
+    expect(result.redirectPath).toBe("/onboarding");
+    expect(result.isApproved).toBe(true);
+    expect(result.upsert.status).toBe("active");
   });
 
   it("promotes ADMIN_EMAIL to admin and approves dashboard access", async () => {
@@ -111,19 +111,13 @@ describe("resolveGoogleLogin", () => {
     expect(result.upsert.status).toBe("active");
   });
 
-  it("approves via approved application when no user row yet", async () => {
-    (db.getApprovedApplicationByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
-      id: 5,
-      email: "app@gmail.com",
-      status: "approved",
-    });
-
+  it("sends new Google users to onboarding", async () => {
     const result = await resolveGoogleLogin({
       sub: googleSub,
-      email: "app@gmail.com",
+      email: "new@gmail.com",
     });
 
-    expect(result.redirectPath).toBe("/app");
+    expect(result.redirectPath).toBe("/onboarding");
     expect(result.isApproved).toBe(true);
     expect(result.upsert.status).toBe("active");
   });

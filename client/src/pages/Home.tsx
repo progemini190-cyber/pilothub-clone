@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { Menu, X } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 export default function Home() {
@@ -12,7 +11,7 @@ export default function Home() {
 
   const navLinks = [
     { label: "Pricing", href: "/pricing" },
-    { label: "Apply", href: "/apply" },
+    { label: "Sign In", href: "/sign-in" },
   ];
 
   return (
@@ -52,7 +51,22 @@ export default function Home() {
                 Dashboard
               </button>
             ) : (
-              <GoogleSignInButton size="compact" className="!shadow-none" />
+              <>
+                <button
+                  onClick={() => setLocation("/sign-in")}
+                  className="text-sm font-medium transition"
+                  style={{ color: "oklch(70% 0.03 220)" }}
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => setLocation("/sign-up")}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition"
+                  style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}
+                >
+                  Sign Up
+                </button>
+              </>
             )}
           </div>
 
@@ -64,7 +78,13 @@ export default function Home() {
                 Dashboard
               </button>
             ) : (
-              <GoogleSignInButton size="compact" className="!px-2.5 !py-1.5 !text-xs !shadow-none" />
+              <button
+                onClick={() => setLocation("/sign-up")}
+                className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
+                style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}
+              >
+                Sign Up
+              </button>
             )}
             <button
               type="button"
@@ -139,13 +159,19 @@ export default function Home() {
                 </button>
               ) : (
                 <>
-                  <GoogleSignInButton
-                    className="w-full sm:w-auto !shadow-md"
-                  />
-                  <button onClick={() => setLocation("/apply")}
+                  <button
+                    onClick={() => setLocation("/sign-up")}
                     className="px-5 py-2.5 rounded-xl font-semibold text-sm transition w-full sm:w-auto text-center"
-                    style={{ background: "transparent", color: "white", border: "1px solid oklch(40% 0.05 220)" }}>
-                    Apply for Access
+                    style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)", boxShadow: "0 0 20px oklch(72% 0.18 162 / 0.4)" }}
+                  >
+                    Sign Up Free
+                  </button>
+                  <button
+                    onClick={() => setLocation("/sign-in")}
+                    className="px-5 py-2.5 rounded-xl font-semibold text-sm transition w-full sm:w-auto text-center"
+                    style={{ background: "transparent", color: "white", border: "1px solid oklch(40% 0.05 220)" }}
+                  >
+                    Sign In
                   </button>
                 </>
               )}
@@ -276,10 +302,12 @@ export default function Home() {
               style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)", boxShadow: "0 0 24px oklch(72% 0.18 162 / 0.4)" }}>
               View Pricing
             </button>
-            <button onClick={() => setLocation("/apply")}
+            <button
+              onClick={() => setLocation("/sign-up")}
               className="px-5 py-2.5 rounded-xl font-semibold text-sm transition"
-              style={{ background: "transparent", color: "white", border: "1px solid oklch(40% 0.05 220)" }}>
-              Apply for Access
+              style={{ background: "transparent", color: "white", border: "1px solid oklch(40% 0.05 220)" }}
+            >
+              Sign Up
             </button>
           </div>
         </div>

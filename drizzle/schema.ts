@@ -28,6 +28,8 @@ export const users = sqliteTable("users", {
   hasUsedFounderStarter: text("hasUsedFounderStarter", { enum: ["true", "false"] }).notNull().default("false"),
   telegramChatId: text("telegramChatId", { length: 64 }),
   planExpiryDate: integer("planExpiryDate", { mode: "timestamp_ms" }),
+  passwordHash: text("passwordHash"),
+  onboardingCompletedAt: integer("onboardingCompletedAt", { mode: "timestamp_ms" }),
   createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
     .notNull()

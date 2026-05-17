@@ -2,7 +2,8 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
-import { isPendingUserStatus, isUserApproved } from "./userStatus";
+import { userNeedsOnboarding } from "@shared/onboarding";
+import { isUserApproved } from "./userStatus";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -28,14 +29,20 @@ const requireUser = t.middleware(async opts => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
-// Blocks users whose account is still pending admin approval
+// Blocks users who are inactive or have not finished onboarding
 const requireApproved = t.middleware(async opts => {
   const { ctx, next } = opts;
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
-  if (!isUserApproved(ctx.user) && isPendingUserStatus(ctx.user.status)) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Your account is pending admin approval." });
+  if (!isUserApproved(ctx.user)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Your account is not active." });
+  }
+  if (userNeedsOnboarding(ctx.user)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Please complete onboarding to continue.",
+    });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });
 });

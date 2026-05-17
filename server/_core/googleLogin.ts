@@ -1,8 +1,9 @@
-import type { InsertUser, User } from "../../drizzle/schema";
+import type { InsertUser } from "../../drizzle/schema";
 import * as db from "../db";
-import { isAdminEmail, shouldGrantAdminRole } from "./adminAccess";
+import { shouldGrantAdminRole } from "./adminAccess";
 import { ENV } from "./env";
-import { isApprovedUserStatus, isPendingUserStatus, isUserApproved } from "./userStatus";
+import { isUserApproved } from "./userStatus";
+import { userNeedsOnboarding } from "@shared/onboarding";
 
 export type GoogleUserInfo = {
   sub: string;
@@ -22,52 +23,18 @@ export type GoogleLoginResolution = {
 
 /**
  * Resolves redirect + upsert for Google OAuth callback.
- * Looks up users by Google `sub` and email (handles duplicate legacy rows).
+ * All users are active; incomplete profiles go to /onboarding.
  */
 export async function resolveGoogleLogin(userInfo: GoogleUserInfo): Promise<GoogleLoginResolution> {
   const googleSub = userInfo.sub;
   const userEmail = userInfo.email ? db.normalizeEmail(userInfo.email) : null;
 
-  const { user: existingUser, byOpenId, byEmail } = await db.resolveUserForGoogleLogin(
-    userEmail,
-    googleSub,
-  );
-
-  let approvedApplication: Awaited<ReturnType<typeof db.getApprovedApplicationByEmail>> | undefined;
-  let latestApplication: Awaited<ReturnType<typeof db.getApplicationByEmail>> | undefined;
-  if (userEmail) {
-    try {
-      approvedApplication = await db.getApprovedApplicationByEmail(userEmail);
-      latestApplication = await db.getApplicationByEmail(userEmail);
-    } catch (dbErr) {
-      console.error("[Google OAuth] Application lookup failed (non-fatal):", dbErr);
-    }
-  }
-
-  const isOwner = Boolean(ENV.ownerGoogleSub && googleSub === ENV.ownerGoogleSub);
-  const isAdmin = Boolean(userEmail && isAdminEmail(userEmail));
-  const isApproved =
-    isOwner ||
-    isAdmin ||
-    isUserApproved(existingUser) ||
-    Boolean(approvedApplication) ||
-    latestApplication?.status === "approved";
-
-  const userStatus =
-    existingUser?.status ??
-    (isApproved ? "active" : latestApplication?.status === "approved" ? "active" : "pending");
+  const { user: existingUser } = await db.resolveUserForGoogleLogin(userEmail, googleSub);
 
   const grantAdmin = shouldGrantAdminRole({
     email: userEmail,
     googleSub,
     ownerGoogleSub: ENV.ownerGoogleSub,
-  });
-
-  console.log("User Login Attempt:", userEmail, "Status:", userStatus, "Role:", grantAdmin ? "admin" : existingUser?.role ?? "user", {
-    matchedByOpenId: Boolean(byOpenId),
-    matchedByEmail: byEmail.length,
-    existingUserId: existingUser?.id,
-    isApproved,
   });
 
   const upsert: InsertUser = {
@@ -76,35 +43,38 @@ export async function resolveGoogleLogin(userInfo: GoogleUserInfo): Promise<Goog
     email: userEmail ?? userInfo.email ?? existingUser?.email ?? null,
     loginMethod: "google",
     lastSignedIn: new Date(),
+    status: "active",
   };
 
   if (grantAdmin) {
     upsert.role = "admin";
-    upsert.status = "active";
-  } else if (!existingUser) {
-    upsert.status = isApproved ? "active" : "pending";
-  } else if (isApproved && !isApprovedUserStatus(existingUser.status)) {
+  }
+
+  if (existingUser && !isUserApproved(existingUser)) {
     upsert.status = "active";
   }
 
-  let redirectPath = "/app";
-  if (!isApproved) {
-    const hasExistingAccount = Boolean(existingUser || latestApplication);
-    const pendingUser = existingUser && isPendingUserStatus(existingUser.status);
-    const pendingApp = latestApplication?.status === "pending";
-    if (hasExistingAccount && (pendingUser || pendingApp)) {
-      redirectPath = `/login-required?reason=pending&email=${encodeURIComponent(userEmail ?? "")}`;
-    } else {
-      redirectPath = `/login-required?reason=not_approved&email=${encodeURIComponent(userEmail ?? "")}`;
-    }
-  }
+  const mergedProfile = {
+    name: upsert.name ?? existingUser?.name,
+    useCase: existingUser?.useCase,
+    role: grantAdmin ? "admin" : existingUser?.role,
+    onboardingCompletedAt: (existingUser as { onboardingCompletedAt?: Date | null } | undefined)
+      ?.onboardingCompletedAt,
+  };
+
+  const redirectPath = userNeedsOnboarding(mergedProfile) ? "/onboarding" : "/app";
+
+  console.info("User Login Attempt:", userEmail, "redirect:", redirectPath, {
+    existingUserId: existingUser?.id,
+    needsOnboarding: userNeedsOnboarding(mergedProfile),
+  });
 
   return {
     sessionOpenId: googleSub,
     redirectPath,
-    userStatus,
+    userStatus: "active",
     userEmail,
-    isApproved,
+    isApproved: true,
     upsert,
   };
 }

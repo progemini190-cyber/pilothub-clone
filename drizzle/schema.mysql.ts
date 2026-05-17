@@ -38,6 +38,8 @@ export const users = mysqlTable("users", {
   hasUsedFounderStarter: mysqlEnum("hasUsedFounderStarter", ["true", "false"]).notNull().default("false"),
   telegramChatId: varchar("telegramChatId", { length: 64 }),
   planExpiryDate: timestamp("planExpiryDate"),
+  passwordHash: text("passwordHash"),
+  onboardingCompletedAt: timestamp("onboardingCompletedAt"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
   lastSignedIn: timestamp("lastSignedIn").notNull().defaultNow(),

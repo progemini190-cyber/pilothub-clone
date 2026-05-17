@@ -228,6 +228,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
       await ensureTelegramSchema().catch((err) =>
         console.warn("[Database] Telegram schema migration skipped:", err),
       );
+      const { ensureAuthSchema } = await import("./ensureAuthSchema");
+      await ensureAuthSchema().catch((err) =>
+        console.warn("[Database] Auth schema migration skipped:", err),
+      );
       return _db;
     }
   }
@@ -260,6 +264,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
           await ensureTelegramSchema().catch((err) =>
             console.warn("[Database] Telegram schema migration skipped:", err),
           );
+          const { ensureAuthSchema } = await import("./ensureAuthSchema");
+          await ensureAuthSchema().catch((err) =>
+            console.warn("[Database] Auth schema migration skipped:", err),
+          );
           return _db;
         }
       }
@@ -284,6 +292,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
       await ensureTelegramSchema().catch((err) =>
         console.warn("[Database] Telegram schema migration skipped:", err),
       );
+      const { ensureAuthSchema } = await import("./ensureAuthSchema");
+      await ensureAuthSchema().catch((err) =>
+        console.warn("[Database] Auth schema migration skipped:", err),
+      );
       return _db;
     }
   }
@@ -304,6 +316,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
         const { ensureTelegramSchema } = await import("./ensureTelegramSchema");
         await ensureTelegramSchema().catch((err) =>
           console.warn("[Database] Telegram schema migration skipped:", err),
+        );
+        const { ensureAuthSchema } = await import("./ensureAuthSchema");
+        await ensureAuthSchema().catch((err) =>
+          console.warn("[Database] Auth schema migration skipped:", err),
         );
         return _db;
       }

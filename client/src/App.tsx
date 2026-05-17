@@ -7,6 +7,9 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Pricing from "./pages/Pricing";
 import Apply from "./pages/Apply";
+import SignIn from "./pages/SignIn";
+import SignUp from "./pages/SignUp";
+import Onboarding from "./pages/Onboarding";
 import Dashboard from "./pages/Dashboard";
 import BizPilot from "./pages/BizPilot";
 import FounderPilot from "./pages/FounderPilot";
@@ -31,7 +34,7 @@ import { PWAInstallPrompt } from "./components/PWAInstallPrompt";
 function isPublicMarketingPath(pathname: string) {
   if (pathname === "/") return true;
   if (pathname === "/admin/login") return true;
-  return /^\/(pricing|apply|login-required|404)(\/|$)/.test(pathname);
+  return /^\/(pricing|apply|sign-in|sign-up|onboarding|login-required|404)(\/|$)/.test(pathname);
 }
 
 function Router() {
@@ -54,6 +57,9 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/pricing"} component={Pricing} />
       <Route path={"/apply"} component={Apply} />
+      <Route path={"/sign-in"} component={SignIn} />
+      <Route path={"/sign-up"} component={SignUp} />
+      <Route path={"/onboarding"} component={Onboarding} />
       <Route path={"/app"} component={Dashboard} />
       <Route path={"/app/bizpilot"} component={BizPilot} />
       <Route path={"/app/founderpilot"} component={FounderPilot} />

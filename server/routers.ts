@@ -16,10 +16,12 @@ import { storagePut } from "./storage";
 import {
   sendApprovalEmail as sendApprovalEmailHelper,
   sendPaymentConfirmationEmail,
-  sendNewApplicationNotificationEmail,
   sendBroadcastEmail,
 } from "./emailHelper";
 import { isAdminEmail } from "./_core/adminAccess";
+import { hashPassword, verifyPassword } from "./_core/passwordAuth";
+import { setUserSessionCookie } from "./_core/sessionCookie";
+import { userNeedsOnboarding } from "@shared/onboarding";
 
 const COOKIE_NAME = "app_session_id";
 
@@ -59,6 +61,103 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    register: publicProcedure
+      .input(
+        z.object({
+          email: z.string().email(),
+          password: z.string().min(8, "Password must be at least 8 characters"),
+          name: z.string().min(1).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        await db.assertDatabase();
+        const normalizedEmail = db.normalizeEmail(input.email);
+        const existing = await db.getUserByEmail(normalizedEmail);
+        if (existing) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "An account with this email already exists. Please sign in.",
+          });
+        }
+
+        const passwordHash = await hashPassword(input.password);
+        const { openId } = await db.createEmailPasswordUser({
+          email: normalizedEmail,
+          passwordHash,
+          name: input.name,
+        });
+
+        await setUserSessionCookie(ctx.req, ctx.res, openId, input.name ?? normalizedEmail);
+
+        return {
+          success: true,
+          redirectTo: "/onboarding",
+          needsOnboarding: true,
+        };
+      }),
+    login: publicProcedure
+      .input(
+        z.object({
+          email: z.string().email(),
+          password: z.string().min(1),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        await db.assertDatabase();
+        const normalizedEmail = db.normalizeEmail(input.email);
+        const user = await db.getUserByEmail(normalizedEmail);
+        if (!user) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password." });
+        }
+
+        const storedHash = (user as { passwordHash?: string | null }).passwordHash;
+        if (!storedHash) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "This account uses Google sign-in. Continue with Google instead.",
+          });
+        }
+
+        const valid = await verifyPassword(input.password, storedHash);
+        if (!valid) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password." });
+        }
+
+        await db.upsertUser({
+          openId: user.openId,
+          email: user.email,
+          lastSignedIn: new Date(),
+          status: "active",
+        });
+
+        await setUserSessionCookie(
+          ctx.req,
+          ctx.res,
+          user.openId,
+          user.name ?? user.email ?? "User",
+        );
+
+        const needsOnboarding = userNeedsOnboarding(user);
+        return {
+          success: true,
+          redirectTo: needsOnboarding ? "/onboarding" : "/app",
+          needsOnboarding,
+        };
+      }),
+    completeOnboarding: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().min(1, "Name is required"),
+          useCase: z.string().min(1, "Purpose is required"),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        await db.completeUserOnboarding(ctx.user.id, {
+          name: input.name,
+          useCase: input.useCase,
+        });
+        return { success: true, redirectTo: "/app" };
+      }),
     updateProfile: protectedProcedure
       .input(z.object({
         name: z.string().min(1).optional(),
@@ -78,89 +177,6 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
-  }),
-
-  // ── Application submission (public, no login required) ──
-  applications: router({
-    submit: publicProcedure
-      .input(z.object({
-        fullName: z.string().min(1),
-        email: z.string().email(),
-        phone: z.string().optional(),
-        businessName: z.string().optional(),
-        businessType: z.string().optional(),
-        useCase: z.string().optional(),
-        plan: z.enum(["bizpilot", "founderpilot", "free"]).optional().default("free"),
-      }))
-      .mutation(async ({ input }) => {
-        const normalizedEmail = db.normalizeEmail(input.email);
-        const existingUser = await db.getUserByEmail(normalizedEmail);
-        if (existingUser) {
-          if (existingUser.status === "active") {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: "An account with this email already exists. Please sign in with Google.",
-            });
-          }
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Your application is already on file. Please wait for admin approval, then sign in with Google.",
-          });
-        }
-
-        const existingApplication = await db.getApplicationByEmail(normalizedEmail);
-        if (existingApplication) {
-          if (existingApplication.status === "approved") {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: "This email is already approved. Please sign in with Google.",
-            });
-          }
-          if (existingApplication.status === "pending") {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: "An application with this email is already pending review. Please wait for admin approval.",
-            });
-          }
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "An application with this email was already reviewed. Contact support if you need access.",
-          });
-        }
-
-        const app = await db.createApplication({
-          fullName: input.fullName,
-          email: normalizedEmail,
-          phone: input.phone,
-          businessName: input.businessName,
-          businessType: input.businessType,
-          useCase: input.useCase,
-          plan: input.plan,
-          source: "website",
-        });
-        try {
-          await sendNewApplicationNotificationEmail({
-            fullName: input.fullName,
-            email: normalizedEmail,
-            phone: input.phone,
-            businessName: input.businessName,
-            businessType: input.businessType,
-            useCase: input.useCase,
-            plan: input.plan,
-            source: "website",
-            applicationId: app.id,
-          });
-        } catch (e) {
-          console.error("[applications.submit] Application notification email failed:", e);
-        }
-        try {
-          await notifyOwner({
-            title: `📋 New Application: ${input.fullName}`,
-            content: `New application from ${input.fullName} (${input.email})\nPlan: ${input.plan}\nBusiness: ${input.businessName ?? "N/A"}\nUse case: ${input.useCase ?? "N/A"}`,
-          });
-        } catch (e) { /* non-blocking */ }
-        return { success: true, applicationId: app.id };
-      }),
   }),
 
   // ── AI chat and conversation routers ──

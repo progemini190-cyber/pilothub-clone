@@ -52,7 +52,7 @@ export default function AdminLogin() {
         </div>
         <div className="flex items-center gap-3 sm:gap-6 flex-shrink-0 flex-wrap justify-end">
           <button onClick={() => setLocation("/pricing")} className="text-sm font-medium text-slate-400 hover:text-white transition">Pricing</button>
-          <button onClick={() => setLocation("/apply")} className="text-sm font-medium text-slate-400 hover:text-white transition">Apply</button>
+          <button onClick={() => setLocation("/sign-up")} className="text-sm font-medium text-slate-400 hover:text-white transition">Sign Up</button>
           <button onClick={() => setLocation("/")}
             className="px-4 py-2 rounded-lg text-sm font-semibold transition"
             style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>

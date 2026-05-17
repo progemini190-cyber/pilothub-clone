@@ -1,6 +1,7 @@
 import { ReactNode, useLayoutEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { userNeedsOnboarding } from "@shared/onboarding";
 import { trpc } from "@/lib/trpc";
 import {
   LayoutDashboard, MessageSquare, Settings, Users, Key, FileText,
@@ -25,27 +26,16 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
 
   const isAdmin = isAdminShell || user?.role === "admin";
 
-  const userStatus = (user as { status?: string | null } | null)?.status ?? "";
-  const statusLower = userStatus.toLowerCase();
-  const isApprovedUser =
-    isAdmin ||
-    statusLower === "active" ||
-    statusLower === "approved" ||
-    userStatus === "APPROVED";
-  const isPendingUser = statusLower === "pending";
+  const needsOnboarding = Boolean(user && userNeedsOnboarding(user));
 
-  // Approval gate: send unapproved users to login-required as early as possible (before paint when cached).
   useLayoutEffect(() => {
     if (isAdminShell) return;
-    if (user && isPendingUser && !isApprovedUser) {
-      window.location.replace(
-        `/login-required?reason=pending&email=${encodeURIComponent(String((user as { email?: string | null }).email ?? ""))}`,
-      );
+    if (user && needsOnboarding) {
+      window.location.replace("/onboarding");
     }
-  }, [user, isAdminShell, isPendingUser, isApprovedUser]);
+  }, [user, isAdminShell, needsOnboarding]);
 
-  // Render-time guard: show nothing while checking or if pending
-  if (!isAdminShell && (loading || (user && isPendingUser && !isApprovedUser))) {
+  if (!isAdminShell && (loading || (user && needsOnboarding))) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "oklch(12% 0.03 220)" }}>
         <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: "oklch(72% 0.18 162 / 0.4)", borderTopColor: "transparent" }} />

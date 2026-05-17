@@ -1,4 +1,5 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { SESSION_APP_ID } from "@shared/session";
 import { ForbiddenError } from "@shared/_core/errors";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
@@ -45,7 +46,7 @@ class SessionService {
     return this.signSession(
       {
         openId,
-        appId: ENV.googleClientId,
+        appId: SESSION_APP_ID,
         name: options.name || "",
       },
       options
@@ -91,12 +92,19 @@ class SessionService {
         return null;
       }
 
-      if (!ENV.googleClientId || appId !== ENV.googleClientId) {
-        console.warn("[Auth] Session appId does not match configured Google client");
+      const validAppIds = new Set(
+        [SESSION_APP_ID, ENV.googleClientId].filter((id): id is string => Boolean(id)),
+      );
+      if (!validAppIds.has(appId)) {
+        console.warn("[Auth] Session appId is not recognized");
         return null;
       }
 
-      return { openId, appId, name };
+      return {
+        openId,
+        appId,
+        name: isNonEmptyString(name) ? name : "",
+      };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
       return null;
