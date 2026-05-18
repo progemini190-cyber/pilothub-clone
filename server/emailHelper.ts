@@ -275,6 +275,59 @@ export async function sendApprovalEmail({
   });
 }
 
+export type PaymentSubmittedNotificationInput = {
+  userName: string;
+  userEmail: string;
+  plan: string;
+  amount: number;
+  paymentMethod: string;
+  transactionRef?: string | null;
+};
+
+/** Notify admin when a user submits a payment from the website. */
+export async function sendNewPaymentSubmittedEmail(
+  payment: PaymentSubmittedNotificationInput,
+): Promise<boolean> {
+  const rows = [
+    ["Name", payment.userName],
+    ["Email", payment.userEmail],
+    ["Plan", payment.plan],
+    ["Amount", `${payment.amount.toLocaleString()} MMK`],
+    ["Payment Method", payment.paymentMethod],
+    ["Transaction Ref", payment.transactionRef ?? "—"],
+  ] as const;
+
+  const tableRows = rows
+    .map(
+      ([label, value]) =>
+        `<tr>
+          <td style="padding: 10px 14px; color: #64748b; font-size: 13px; vertical-align: top; width: 140px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(label)}</td>
+          <td style="padding: 10px 14px; color: #1e293b; font-size: 14px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const bodyHtml = `
+    <h2 style="color: #0f172a; font-size: 20px; margin: 0 0 20px; font-weight: 600;">New payment submitted</h2>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+      ${tableRows}
+    </table>
+    <p style="color: #64748b; font-size: 13px; margin: 24px 0 0;">
+      Review in the <a href="https://www.pilothub.vip/admin/payments" style="color: #0d9488; text-decoration: none;">Admin Payments</a> panel.
+    </p>
+  `;
+
+  const wrappedHtml = wrapPilotHubEmailHtml(bodyHtml);
+  const plain = rows.map(([k, v]) => `${k}: ${v}`).join("\n");
+
+  return sendEmail({
+    to: PILOTHUB_ADMIN_NOTIFICATION_EMAIL,
+    subject: "New Payment Submitted!",
+    html: wrappedHtml,
+    text: `New Payment Submitted!\n\n${plain}\n\nReview: https://www.pilothub.vip/admin/payments`,
+  });
+}
+
 /**
  * Send payment confirmation email
  */

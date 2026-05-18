@@ -208,6 +208,44 @@ export async function linkUserToGoogleOpenId(
 
 // ── Tiered message counter helpers ──
 
+export const WEB_CHAT_UNLIMITED_LIMIT = 999999;
+
+/** Admin subscription `plan` + `status` grants unlimited web chat for that advisor. */
+export function hasActivePaidWebPlan(
+  subscriptionPlan: string | null | undefined,
+  status: string | null | undefined,
+  advisor: "bizpilot" | "founderpilot",
+): boolean {
+  const st = (status ?? "active").toLowerCase().trim();
+  if (st !== "active") return false;
+  const p = (subscriptionPlan ?? "").toLowerCase().trim();
+  if (!p || p === "free") return false;
+  if (p === "pro" || p.endsWith("-pro")) return true;
+  if (advisor === "bizpilot") {
+    return p === "bizpilot" || p.includes("bizpilot");
+  }
+  return p === "founderpilot" || p.includes("founderpilot");
+}
+
+function isUnlimitedWebAdvisorUsage(
+  advisor: "bizpilot" | "founderpilot",
+  row: {
+    plan?: string | null;
+    status?: string | null;
+    planTypeBiz?: string | null;
+    planTypeFounder?: string | null;
+    bizMessageLimit?: number | null;
+    founderMessageLimit?: number | null;
+  },
+): boolean {
+  const tierPlan = advisor === "bizpilot" ? row.planTypeBiz : row.planTypeFounder;
+  if (tierPlan === "pro") return true;
+  const limit =
+    advisor === "bizpilot" ? row.bizMessageLimit ?? 5 : row.founderMessageLimit ?? 5;
+  if (limit >= WEB_CHAT_UNLIMITED_LIMIT) return true;
+  return hasActivePaidWebPlan(row.plan, row.status, advisor);
+}
+
 /**
  * Get the current message usage and limit for a user's advisor.
  * Returns { used, limit, planType, hasUsedStarter }
@@ -224,21 +262,26 @@ export async function getMessageUsage(userId: number, advisor: "bizpilot" | "fou
     planTypeFounder: users.planTypeFounder,
     hasUsedBizStarter: users.hasUsedBizStarter,
     hasUsedFounderStarter: users.hasUsedFounderStarter,
+    plan: users.plan,
+    status: users.status,
   }).from(users).where(eq(users.id, userId)).limit(1);
   const row = result[0];
   if (!row) return { used: 0, limit: 5, planType: "free" as const, hasUsedStarter: false };
+  const unlimited = isUnlimitedWebAdvisorUsage(advisor, row);
   if (advisor === "bizpilot") {
+    const planType = (row.planTypeBiz ?? "free") as "free" | "starter" | "pro";
     return {
       used: row.bizMessagesUsed ?? 0,
-      limit: row.bizMessageLimit ?? 5,
-      planType: (row.planTypeBiz ?? "free") as "free" | "starter" | "pro",
+      limit: unlimited ? WEB_CHAT_UNLIMITED_LIMIT : row.bizMessageLimit ?? 5,
+      planType: unlimited ? ("pro" as const) : planType,
       hasUsedStarter: row.hasUsedBizStarter === "true",
     };
   } else {
+    const planType = (row.planTypeFounder ?? "free") as "free" | "starter" | "pro";
     return {
       used: row.founderMessagesUsed ?? 0,
-      limit: row.founderMessageLimit ?? 5,
-      planType: (row.planTypeFounder ?? "free") as "free" | "starter" | "pro",
+      limit: unlimited ? WEB_CHAT_UNLIMITED_LIMIT : row.founderMessageLimit ?? 5,
+      planType: unlimited ? ("pro" as const) : planType,
       hasUsedStarter: row.hasUsedFounderStarter === "true",
     };
   }
@@ -251,6 +294,7 @@ export async function incrementMessageUsed(userId: number, advisor: "bizpilot" |
   const db = await getDb();
   if (!db) return;
   const usage = await getMessageUsage(userId, advisor);
+  if (usage.limit >= WEB_CHAT_UNLIMITED_LIMIT) return;
   if (advisor === "bizpilot") {
     await db.update(users).set({ bizMessagesUsed: usage.used + 1 }).where(eq(users.id, userId));
   } else {
@@ -644,7 +688,23 @@ export async function updateUserSubscription(userId: number, plan: string, statu
   const now = new Date();
   const end = new Date(now);
   end.setMonth(end.getMonth() + 1);
-  await db.update(users).set({ plan, status, subscriptionStart: now, subscriptionEnd: end, updatedAt: now }).where(eq(users.id, userId));
+  const updateSet: Record<string, unknown> = {
+    plan,
+    status,
+    subscriptionStart: now,
+    subscriptionEnd: end,
+    updatedAt: now,
+  };
+  const isActive = status.toLowerCase().trim() === "active";
+  if (isActive && hasActivePaidWebPlan(plan, status, "bizpilot")) {
+    updateSet.planTypeBiz = "pro";
+    updateSet.bizMessageLimit = WEB_CHAT_UNLIMITED_LIMIT;
+  }
+  if (isActive && hasActivePaidWebPlan(plan, status, "founderpilot")) {
+    updateSet.planTypeFounder = "pro";
+    updateSet.founderMessageLimit = WEB_CHAT_UNLIMITED_LIMIT;
+  }
+  await db.update(users).set(updateSet as never).where(eq(users.id, userId));
 }
 
 export async function deleteUser(userId: number): Promise<void> {

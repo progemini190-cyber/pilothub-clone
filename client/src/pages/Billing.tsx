@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useLocation } from "wouter";
 
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
+import { compressImageToBase64UnderLimit } from "@/lib/compressImage";
 
 type PlanId = "bizpilot-starter" | "bizpilot-pro" | "founderpilot-starter" | "founderpilot-pro";
 
@@ -119,7 +120,7 @@ export default function Billing() {
   const { data: myPaymentsData } = trpc.payments.myPayments.useQuery();
   const myPayments = myPaymentsData?.payments;
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
@@ -127,9 +128,14 @@ export default function Billing() {
       return;
     }
     setScreenshotFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setScreenshotPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    try {
+      const { previewDataUrl } = await compressImageToBase64UnderLimit(file);
+      setScreenshotPreview(previewDataUrl);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = (ev) => setScreenshotPreview(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSubmit = async () => {
@@ -141,14 +147,11 @@ export default function Billing() {
     try {
       let screenshotUrl: string | undefined;
       if (screenshotFile) {
-        const arrayBuffer = await screenshotFile.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        let binary = "";
-        for (let i = 0; i < uint8Array.length; i++) binary += String.fromCharCode(uint8Array[i]);
-        const base64 = btoa(binary);
+        const { base64, contentType } = await compressImageToBase64UnderLimit(screenshotFile);
+        const ext = contentType.includes("png") ? "png" : "jpg";
         const result = await uploadScreenshot.mutateAsync({
-          filename: screenshotFile.name,
-          contentType: screenshotFile.type,
+          filename: screenshotFile.name.replace(/\.\w+$/, "") + `.${ext}`,
+          contentType,
           dataBase64: base64,
         });
         screenshotUrl = result.url;
@@ -159,7 +162,9 @@ export default function Billing() {
         transactionRef: transactionRef.trim() || undefined,
         screenshotUrl,
       });
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Submission failed. Please try again.";
+      toast.error(message);
       setSubmitting(false);
     }
   };

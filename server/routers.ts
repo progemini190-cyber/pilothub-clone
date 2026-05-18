@@ -17,6 +17,7 @@ import {
   sendApprovalEmail as sendApprovalEmailHelper,
   sendPaymentConfirmationEmail,
   sendBroadcastEmail,
+  sendNewPaymentSubmittedEmail,
 } from "./emailHelper";
 import { isAdminEmail } from "./_core/adminAccess";
 import { hashPassword, verifyPassword } from "./_core/passwordAuth";
@@ -385,6 +386,16 @@ export const appRouter = router({
           await notifyOwner({
             title: `💰 New Payment: ${ctx.user.name} - ${input.plan}`,
             content: `Payment submitted by ${ctx.user.name} (${ctx.user.email})\nPlan: ${input.plan}\nMethod: ${input.paymentMethod}\nRef: ${input.transactionRef ?? "N/A"}`,
+          });
+        } catch (e) { /* non-blocking */ }
+        try {
+          await sendNewPaymentSubmittedEmail({
+            userName: ctx.user.name ?? "Unknown",
+            userEmail: ctx.user.email ?? "",
+            plan: input.plan,
+            amount: amounts[input.plan] ?? 0,
+            paymentMethod: input.paymentMethod,
+            transactionRef: input.transactionRef,
           });
         } catch (e) { /* non-blocking */ }
         return { success: true, paymentId: payment.id };
