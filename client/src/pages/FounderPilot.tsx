@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { DashboardShell } from "@/components/DashboardShell";
-import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation } from "wouter";
 import { Send, Plus, MessageSquare, Lock, Brain, User } from "lucide-react";
 import { Streamdown } from "streamdown";
-import { toast } from "sonner";
+import { useAdvisorChat } from "@/hooks/useAdvisorChat";
 
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
@@ -16,88 +15,37 @@ const QUICK_PROMPTS = [
   "Co-founder conflicts ကို ဘယ်လို resolve လုပ်ရမလဲ?",
 ];
 
-type Message = { role: "user" | "assistant"; content: string };
-
 export default function FounderPilot() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [conversationId, setConversationId] = useState<number | undefined>();
-  const [sending, setSending] = useState(false);
-  const [showLimitModal, setShowLimitModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const {
+    messages,
+    conversationId,
+    sending,
+    showLimitModal,
+    setShowLimitModal,
+    conversationsQuery,
+    messagesLeft,
+    messagesLimit,
+    isUnlimited,
+    isLimitReached,
+    planType,
+    hasPaidPlan,
+    handleSend,
+    handleNewChat,
+    loadConversation,
+  } = useAdvisorChat("founderpilot", user?.id);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) setLocation("/sign-in");
-  }, [authLoading, isAuthenticated]);
+  }, [authLoading, isAuthenticated, setLocation]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
-
-  const conversationsQuery = trpc.ai.conversations.list.useQuery(
-    { modelSlug: "founderpilot" },
-    { enabled: !!user }
-  );
-
-  const usageQuery = trpc.ai.messageUsage.useQuery(undefined, { enabled: !!user });
-  const usage = usageQuery.data?.founder;
-  const messagesUsed = usage?.used ?? 0;
-  const messagesLimit = usage?.limit ?? 5;
-  const messagesLeft = Math.max(0, messagesLimit - messagesUsed);
-  const isUnlimited = messagesLimit >= 99999;
-  const isLimitReached = !isUnlimited && messagesLeft <= 0;
-  const planType = usage?.planType ?? "free";
-
-  const sendMutation = trpc.ai.founderpilot.useMutation({
-    onSuccess: (data) => {
-      setConversationId(data.conversationId);
-      setMessages(prev => [...prev, { role: "assistant", content: data.message }]);
-      setSending(false);
-      usageQuery.refetch();
-      conversationsQuery.refetch();
-    },
-    onError: (err) => {
-      setSending(false);
-      if (err.message === "MESSAGE_LIMIT_REACHED") {
-        setShowLimitModal(true);
-      } else {
-        toast.error(err.message || "Something went wrong");
-      }
-    },
-  });
-
-  const handleSend = (text?: string) => {
-    const msg = (text ?? input).trim();
-    if (!msg || sending) return;
-    if (isLimitReached) { setShowLimitModal(true); return; }
-    setMessages(prev => [...prev, { role: "user", content: msg }]);
-    setInput("");
-    setSending(true);
-    sendMutation.mutate({ message: msg, conversationId });
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-  };
-
-  const handleNewChat = () => { setMessages([]); setConversationId(undefined); };
-
-  const conversationDetailQuery = trpc.ai.conversations.get.useQuery(
-    { conversationId: conversationId! },
-    { enabled: !!conversationId, staleTime: 5000 }
-  );
-
-  useEffect(() => {
-    if (conversationDetailQuery.data?.messages) {
-      const msgs = conversationDetailQuery.data.messages.map(m => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
-      setMessages(msgs);
-    }
-  }, [conversationDetailQuery.data]);
 
   return (
     <DashboardShell activeTab="founderpilot">
@@ -120,13 +68,15 @@ export default function FounderPilot() {
                 <p className="text-xs font-semibold" style={{ color: messagesLeft <= 2 ? "oklch(75% 0.2 30)" : "oklch(80% 0.18 55)" }}>
                   {messagesLeft} / {messagesLimit} left
                 </p>
-                <p className="text-xs mt-0.5" style={{ color: "oklch(50% 0.03 220)" }}>{planType === "free" ? "Free messages" : planType === "starter" ? "Starter Pack" : "messages"}</p>
+                <p className="text-xs mt-0.5" style={{ color: "oklch(50% 0.03 220)" }}>
+                  {hasPaidPlan ? (planType === "starter" ? "Starter Pack" : "Paid plan") : planType === "free" ? "Free messages" : planType === "starter" ? "Starter Pack" : "messages"}
+                </p>
               </div>
             </div>
           )}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {conversationsQuery.data?.conversations?.map((conv: any) => (
-              <button key={conv.id} onClick={() => { setMessages([]); setConversationId(conv.id); }}
+              <button key={conv.id} onClick={() => loadConversation(conv.id)}
                 className="w-full text-left px-3 py-2 rounded-lg text-xs transition flex items-center gap-2"
                 style={conversationId === conv.id ? {
                   background: "oklch(75% 0.18 55 / 0.12)", color: "oklch(80% 0.18 55)", border: "1px solid oklch(75% 0.18 55 / 0.2)"
@@ -205,7 +155,7 @@ export default function FounderPilot() {
                 </div>
                 <h3 className="text-xl font-bold mb-2 text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>FounderPilot</h3>
                 <p className="text-sm mb-6 max-w-sm" style={{ color: "oklch(65% 0.03 220)" }}>Founder နဲ့ CEO တွေအတွက် strategic advisor ။ Vision, fundraising, leadership အတွက် မေးနိုင်ပါတယ်။</p>
-                {isLimitReached ? (
+                {isLimitReached && !hasPaidPlan ? (
                   <div className="p-4 rounded-xl text-center max-w-sm"
                     style={{ background: "oklch(60% 0.2 30 / 0.1)", border: "1px solid oklch(60% 0.2 30 / 0.3)" }}>
                     <Lock className="w-6 h-6 mx-auto mb-2" style={{ color: "oklch(75% 0.2 30)" }} />
@@ -220,7 +170,7 @@ export default function FounderPilot() {
                 ) : (
                   <div className="grid grid-cols-1 gap-2 w-full max-w-md">
                     {QUICK_PROMPTS.map((p) => (
-                      <button key={p} onClick={() => handleSend(p)}
+                      <button key={p} onClick={() => handleSend(p, () => setInput(""))}
                         className="text-left px-4 py-2.5 rounded-xl text-xs transition"
                         style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(75% 0.18 55 / 0.2)", color: "oklch(70% 0.03 220)" }}>
                         {p}
@@ -276,7 +226,7 @@ export default function FounderPilot() {
                 style={{ background: "oklch(60% 0.2 30 / 0.08)", border: "1px solid oklch(60% 0.2 30 / 0.25)" }}>
                 <div className="flex items-center gap-2">
                   <Lock className="w-4 h-4 flex-shrink-0" style={{ color: "oklch(75% 0.2 30)" }} />
-                  <span className="text-xs sm:text-sm text-white">Free trial ကုန်ပါပြီ</span>
+                  <span className="text-xs sm:text-sm text-white">{hasPaidPlan ? "Message limit reached" : "Free trial ကုန်ပါပြီ"}</span>
                 </div>
                 <button onClick={() => setLocation("/app/billing")}
                   className="w-full sm:w-auto px-3 sm:px-4 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0"
@@ -286,11 +236,12 @@ export default function FounderPilot() {
               </div>
             ) : (
               <div className="flex gap-2 sm:gap-3 items-end">
-                <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
+                <textarea value={input} onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(input, () => setInput("")); } }}
                   placeholder="FounderPilot ကို မေးချင်တာ ရိုက်ထည့်ပါ..." rows={1}
                   className="flex-1 px-3 sm:px-4 py-2 sm:py-3 rounded-xl text-xs sm:text-sm resize-none outline-none text-white"
                   style={{ background: "oklch(20% 0.05 220)", border: "1px solid oklch(75% 0.18 55 / 0.2)", maxHeight: "120px" }} />
-                <button onClick={() => handleSend()} disabled={!input.trim() || sending}
+                <button onClick={() => handleSend(input, () => setInput(""))} disabled={!input.trim() || sending}
                   className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition"
                   style={{ background: input.trim() && !sending ? "oklch(75% 0.18 55)" : "oklch(25% 0.04 220)", boxShadow: input.trim() && !sending ? "0 0 14px oklch(75% 0.18 55 / 0.4)" : "none" }}>
                   <Send className="w-3.5 sm:w-4 h-3.5 sm:h-4" style={{ color: input.trim() && !sending ? "oklch(12% 0.03 220)" : "oklch(45% 0.03 220)" }} />
@@ -314,10 +265,12 @@ export default function FounderPilot() {
               <Lock className="w-6 sm:w-7 h-6 sm:h-7" style={{ color: "oklch(75% 0.2 30)" }} />
             </div>
             <h3 className="text-base sm:text-lg font-bold text-white mb-2" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-              Free Trial ကုန်ပါပြီ
+              {hasPaidPlan ? "Message Limit Reached" : "Free Trial ကုန်ပါပြီ"}
             </h3>
             <p className="text-xs sm:text-sm mb-4 sm:mb-5" style={{ color: "oklch(65% 0.03 220)" }}>
-              FounderPilot free trial (5 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် FounderPilot plan ဝယ်ယူပါ။
+              {hasPaidPlan
+                ? "Your plan message limit has been reached. Upgrade for more messages."
+                : "FounderPilot free trial (5 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် FounderPilot plan ဝယ်ယူပါ။"}
             </p>
             <button onClick={() => { setShowLimitModal(false); setLocation("/app/billing"); }}
               className="w-full py-2 sm:py-3 rounded-xl font-semibold text-xs sm:text-sm mb-2"

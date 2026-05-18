@@ -328,6 +328,44 @@ export async function sendNewPaymentSubmittedEmail(
   });
 }
 
+/** Notify user when admin upgrades their account plan. */
+export async function sendAccountUpgradedEmail({
+  to,
+  name,
+  planName,
+}: {
+  to: string;
+  name: string;
+  planName: string;
+}): Promise<boolean> {
+  const bodyHtml = `
+      <h2 style="color: #0f172a; font-size: 22px; margin: 0 0 16px; font-weight: 600;">Account Upgraded</h2>
+      <p style="color: #475569; line-height: 1.8; margin: 0 0 16px;">
+        မင်္ဂလာပါ ${escapeHtml(name)}။ သင့်အကောင့်ကို <strong style="color: #0d9488;">${escapeHtml(planName)}</strong> သို့ အောင်မြင်စွာ အဆင့်မြှင့်တင်ပေးလိုက်ပါပြီ။
+      </p>
+      <p style="color: #64748b; font-size: 14px; margin: 0;">
+        ယခု PilotHub သို့ ဝင်ရောက်ပြီး AI advisors များကို အသုံးပြုနိုင်ပါပြီ။
+      </p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin: 24px 0;">
+        <tr>
+          <td align="center">
+            <a href="https://www.pilothub.vip/app" style="display: inline-block; padding: 14px 28px; background-color: #0d9488; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px; border-radius: 6px;">Dashboard သို့ သွားပါ →</a>
+          </td>
+        </tr>
+      </table>
+  `;
+
+  const wrappedHtml = wrapPilotHubEmailHtml(bodyHtml);
+  const plain = `မင်္ဂလာပါ။ သင့်အကောင့်ကို ${planName} သို့ အောင်မြင်စွာ အဆင့်မြှင့်တင်ပေးလိုက်ပါပြီ။\n\nhttps://www.pilothub.vip/app`;
+
+  return sendEmail({
+    to,
+    subject: "PilotHub - Account Upgraded!",
+    html: wrappedHtml,
+    text: plain,
+  });
+}
+
 /**
  * Send payment confirmation email
  */

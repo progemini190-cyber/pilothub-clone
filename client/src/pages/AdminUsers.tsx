@@ -4,11 +4,26 @@ import { trpc } from "@/lib/trpc";
 import { DashboardShell } from "@/components/DashboardShell";
 import { Search, Users, Plus, Copy, Check, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
+import { ADMIN_PLAN_OPTIONS, getPlanDisplayName } from "@shared/plans";
 
 const PLAN_COLORS: Record<string, { text: string; bg: string; border: string }> = {
-  bizpilot:     { text: "oklch(65% 0.22 250)", bg: "oklch(65% 0.22 250 / 0.12)", border: "oklch(65% 0.22 250 / 0.3)" },
-  founderpilot: { text: "oklch(78% 0.12 75)",  bg: "oklch(78% 0.12 75 / 0.12)",  border: "oklch(78% 0.12 75 / 0.3)" },
+  bizpilot: { text: "oklch(65% 0.22 250)", bg: "oklch(65% 0.22 250 / 0.12)", border: "oklch(65% 0.22 250 / 0.3)" },
+  founderpilot: { text: "oklch(78% 0.12 75)", bg: "oklch(78% 0.12 75 / 0.12)", border: "oklch(78% 0.12 75 / 0.3)" },
 };
+
+function normalizePlanForSelect(plan: string | null | undefined): string {
+  if (!plan) return "";
+  if (plan === "bizpilot") return "bizpilot-pro";
+  if (plan === "founderpilot") return "founderpilot-pro";
+  return plan;
+}
+
+function planColorKey(plan: string | null | undefined): string {
+  if (!plan) return "";
+  if (plan.includes("founder")) return "founderpilot";
+  if (plan.includes("biz")) return "bizpilot";
+  return plan;
+}
 
 export default function AdminUsers() {
   const [, setLocation] = useLocation();
@@ -32,8 +47,12 @@ export default function AdminUsers() {
     onSuccess: () => { refetch(); toast.success("Role updated"); },
   });
 
-  const updateSub = trpc.admin.users.updateSubscription.useMutation({
-    onSuccess: () => { refetch(); toast.success("Subscription updated"); },
+  const updateUserPlan = trpc.admin.users.updateUserPlan.useMutation({
+    onSuccess: () => {
+      refetch();
+      toast.success("Plan updated — user notified by email");
+    },
+    onError: (err: { message?: string }) => toast.error(err.message || "Failed to update plan"),
   });
 
   const generateUser = trpc.admin.users.generate.useMutation({
@@ -65,8 +84,8 @@ export default function AdminUsers() {
     total: users.length,
     admins: users.filter(u => u.role === "admin").length,
     regular: users.filter(u => u.role === "user").length,
-    bizpilot: users.filter(u => u.plan === "bizpilot" && u.status === "active").length,
-    founderpilot: users.filter(u => u.plan === "founderpilot" && u.status === "active").length,
+    bizpilot: users.filter(u => u.plan?.includes("bizpilot") && u.status === "active").length,
+    founderpilot: users.filter(u => u.plan?.includes("founderpilot") && u.status === "active").length,
   };
 
   const handleGenerate = () => {
@@ -163,7 +182,7 @@ export default function AdminUsers() {
                 </thead>
                 <tbody>
                   {filtered.map((u, i) => {
-                        const planColor = u.plan ? PLAN_COLORS[u.plan] : null;
+                        const planColor = u.plan ? PLAN_COLORS[planColorKey(u.plan)] : null;
                         return (
                           <tr key={u.id}
                         style={{ borderBottom: "1px solid oklch(22% 0.04 220)", background: i % 2 === 0 ? "oklch(18% 0.05 220)" : "oklch(16% 0.04 220)" }}>
@@ -182,9 +201,9 @@ export default function AdminUsers() {
                         </td>
                         <td className="px-4 py-3">
                           {u.plan && planColor ? (
-                            <span className="px-2 py-0.5 rounded-full text-xs font-semibold capitalize"
+                            <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
                               style={{ background: planColor.bg, color: planColor.text, border: `1px solid ${planColor.border}` }}>
-                              {u.plan}
+                              {getPlanDisplayName(u.plan)}
                               {u.status === "active" ? " ✓" : " (inactive)"}
                             </span>
                           ) : (
@@ -204,17 +223,17 @@ export default function AdminUsers() {
                             </button>
                             {/* Plan toggle */}
                             <select
-                              value={u.plan || ""}
+                              value={normalizePlanForSelect(u.plan)}
+                              disabled={updateUserPlan.isPending}
                               onChange={(e) => {
-                                const plan = e.target.value;
-                                if (plan) updateSub.mutate({ userId: u.id, plan, status: "active" });
-                                else updateSub.mutate({ userId: u.id, plan: "", status: "inactive" });
+                                const plan = e.target.value as "" | "bizpilot-starter" | "bizpilot-pro" | "founderpilot-starter" | "founderpilot-pro";
+                                updateUserPlan.mutate({ userId: u.id, plan });
                               }}
-                              className="px-2 py-1 rounded-lg text-xs font-semibold"
+                              className="px-2 py-1 rounded-lg text-xs font-semibold max-w-[11rem]"
                               style={{ background: "oklch(22% 0.05 220)", color: "oklch(65% 0.03 220)", border: "1px solid oklch(28% 0.04 220)", outline: "none" }}>
-                              <option value="">No Plan</option>
-                              <option value="bizpilot">BizPilot</option>
-                              <option value="founderpilot">FounderPilot</option>
+                              {ADMIN_PLAN_OPTIONS.map((opt) => (
+                                <option key={opt.value || "none"} value={opt.value}>{opt.label}</option>
+                              ))}
                             </select>
                             <button
                               onClick={() => {

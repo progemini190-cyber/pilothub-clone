@@ -18,7 +18,9 @@ import {
   sendPaymentConfirmationEmail,
   sendBroadcastEmail,
   sendNewPaymentSubmittedEmail,
+  sendAccountUpgradedEmail,
 } from "./emailHelper";
+import { getPlanDisplayName } from "@shared/plans";
 import { isAdminEmail } from "./_core/adminAccess";
 import { hashPassword, verifyPassword } from "./_core/passwordAuth";
 import { setUserSessionCookie } from "./_core/sessionCookie";
@@ -224,6 +226,25 @@ export const appRouter = router({
       return { biz, founder };
     }),
 
+    /** Latest conversation + messages for web chat restore on mount. */
+    getHistory: approvedProcedure
+      .input(z.object({ modelSlug: z.enum(["bizpilot", "founderpilot"]) }))
+      .query(async ({ ctx, input }) => {
+        const convs = await db.listUserConversations(ctx.user.id, input.modelSlug, 1);
+        if (convs.length === 0) {
+          return { conversationId: null as number | null, messages: [] as Array<{ role: string; content: string }> };
+        }
+        const conv = convs[0]!;
+        const msgs = await db.listConversationMessages(conv.id);
+        return {
+          conversationId: conv.id,
+          messages: msgs.map((m: { role: string; content: string }) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        };
+      }),
+
     bizpilot: approvedProcedure
       .input(z.object({ message: z.string().min(1).max(10000), conversationId: z.number().optional() }))
       .mutation(async ({ ctx, input }) => {
@@ -409,6 +430,12 @@ export const appRouter = router({
         dataBase64: z.string(),
       }))
       .mutation(async ({ ctx, input }) => {
+        if (input.dataBase64.length > 1024 * 1024) {
+          throw new TRPCError({
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Screenshot must be under 1MB after compression. Please try a smaller image.",
+          });
+        }
         const buffer = Buffer.from(input.dataBase64, "base64");
         const key = `payment-screenshots/${ctx.user.id}-${Date.now()}-${input.filename}`;
         const { url } = await storagePut(key, buffer, input.contentType);
@@ -561,6 +588,39 @@ export const appRouter = router({
           await requireAdmin(ctx);
           await db.updateUserSubscription(input.userId, input.plan, input.status);
           return { success: true };
+        }),
+      updateUserPlan: publicProcedure
+        .input(
+          z.object({
+            userId: z.number(),
+            plan: z.enum([
+              "",
+              "bizpilot-starter",
+              "bizpilot-pro",
+              "founderpilot-starter",
+              "founderpilot-pro",
+            ]),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          await requireAdmin(ctx);
+          const user = await db.getUserById(input.userId);
+          if (!user) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+          }
+          await db.applyAdminUserPlan(input.userId, input.plan);
+          if (input.plan && user.email) {
+            try {
+              await sendAccountUpgradedEmail({
+                to: user.email,
+                name: user.name ?? "User",
+                planName: getPlanDisplayName(input.plan),
+              });
+            } catch {
+              /* non-blocking */
+            }
+          }
+          return { success: true, plan: input.plan || null };
         }),
       generate: publicProcedure
         .input(z.object({ name: z.string().min(1), email: z.string().email(), plan: z.enum(["bizpilot", "founderpilot"]).optional(), businessName: z.string().optional() }))
