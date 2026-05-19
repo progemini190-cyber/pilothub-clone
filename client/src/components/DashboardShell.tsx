@@ -281,7 +281,7 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
           href={getTelegramCustomerSupportUrl()}
           target="_blank"
           rel="noopener noreferrer"
-          className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 sm:bottom-6 sm:right-6 sm:px-5 sm:py-3.5 bg-[#0088cc]"
+          className="fixed top-20 right-4 z-40 flex items-center gap-2 rounded-full px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 sm:top-24 sm:right-6 sm:px-5 sm:py-3.5 bg-[#0088cc]"
           style={{ boxShadow: "0 8px 24px rgba(0, 136, 204, 0.45)" }}
           aria-label="Customer support သို့ ဆက်သွယ်ရန် — Telegram"
         >
