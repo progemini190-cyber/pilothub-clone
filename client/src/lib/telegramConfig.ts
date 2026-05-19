@@ -1,5 +1,6 @@
 import {
   buildTelegramStartLink,
+  buildTelegramSupportLink,
   isTelegramBotUsernameConfigured,
   resolveTelegramActivationBotUsername,
   resolveTelegramBizBotUsername,
@@ -34,4 +35,9 @@ export function buildActivationLink(
     botUsername,
   );
   return buildTelegramStartLink(token, username);
+}
+
+/** Customer support Telegram bot link for dashboard FAB. */
+export function getTelegramCustomerSupportUrl(): string {
+  return buildTelegramSupportLink(import.meta.env);
 }

@@ -70,3 +70,23 @@ export function buildTelegramStartLink(token: string, botUsername: string): stri
   const user = normalizeTelegramBotUsername(botUsername) || TELEGRAM_BOT_USERNAME_PLACEHOLDER;
   return `https://t.me/${user}?start=${token}`;
 }
+
+/** Customer support / sales Telegram bot (ChatPilot team). */
+export const TELEGRAM_SUPPORT_BOT_USERNAME_DEFAULT = "chatpilot_ai_bot";
+
+export function resolveTelegramSupportBotUsername(
+  env: Record<string, string | boolean | undefined>,
+): string {
+  const username =
+    normalizeTelegramBotUsername(env.VITE_TELEGRAM_SUPPORT_BOT_USERNAME as string) ||
+    normalizeTelegramBotUsername(env.NEXT_PUBLIC_TELEGRAM_SUPPORT_BOT_USERNAME as string) ||
+    normalizeTelegramBotUsername(env.TELEGRAM_SUPPORT_BOT_USERNAME as string) ||
+    "";
+  return username || TELEGRAM_SUPPORT_BOT_USERNAME_DEFAULT;
+}
+
+export function buildTelegramSupportLink(
+  env: Record<string, string | boolean | undefined>,
+): string {
+  return `https://t.me/${resolveTelegramSupportBotUsername(env)}`;
+}

@@ -4,11 +4,12 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { userNeedsOnboarding } from "@shared/onboarding";
 import { trpc } from "@/lib/trpc";
 import {
-  LayoutDashboard, MessageSquare, Settings, Users, Key, FileText,
-  LogOut, CreditCard, Zap, Lightbulb, DollarSign, Menu, X, ChevronRight, Globe, Megaphone, Bot, Mail
+  LayoutDashboard, Settings, Users, Key, FileText,
+  LogOut, CreditCard, Zap, Lightbulb, DollarSign, Menu, X, ChevronRight, Globe, Megaphone, Bot, Mail, MessageCircle,
 } from "lucide-react";
 
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
+import { getTelegramCustomerSupportUrl } from "@/lib/telegramConfig";
 
 interface DashboardShellProps {
   children: ReactNode;
@@ -274,6 +275,22 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
           {children}
         </div>
       </div>
+
+      {!isAdminShell && user && (
+        <a
+          href={getTelegramCustomerSupportUrl()}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 sm:bottom-6 sm:right-6 sm:px-5 sm:py-3.5 bg-[#0088cc]"
+          style={{ boxShadow: "0 8px 24px rgba(0, 136, 204, 0.45)" }}
+          aria-label="Customer support သို့ ဆက်သွယ်ရန် — Telegram"
+        >
+          <MessageCircle className="w-5 h-5 flex-shrink-0" aria-hidden />
+          <span className="max-w-[11rem] sm:max-w-none leading-tight">
+            Customer support သို့ ဆက်သွယ်ရန်
+          </span>
+        </a>
+      )}
     </div>
   );
 }
