@@ -62,6 +62,8 @@ export const messages = sqliteTable("messages", {
   conversationId: integer("conversationId").notNull(),
   role: text("role", { length: 64 }).notNull(),
   content: text("content").notNull(),
+  /** Optional base64 / data-URL image attachment for multimodal chat */
+  imageData: text("imageData"),
   tokenCount: integer("tokenCount"),
   createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
 });

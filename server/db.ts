@@ -369,6 +369,7 @@ export async function activateTieredPlan(
     if (planType === "starter") {
       updateData.bizMessageLimit = 20;
       updateData.hasUsedBizStarter = "true";
+      updateData.subscriptionStart = now;
     } else {
       updateData.bizMessageLimit = 999999; // pro = unlimited
       updateData.planExpiryDate = end;
@@ -384,6 +385,7 @@ export async function activateTieredPlan(
     if (planType === "starter") {
       updateData.founderMessageLimit = 20;
       updateData.hasUsedFounderStarter = "true";
+      updateData.subscriptionStart = now;
     } else {
       updateData.founderMessageLimit = 999999; // pro = unlimited
       updateData.planExpiryDate = end;
@@ -469,7 +471,13 @@ export async function listConversationMessages(conversationId: number) {
   return db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(asc(messages.createdAt));
 }
 
-export async function createMessage(input: { conversationId: number; role: "user" | "assistant"; content: string; tokenCount?: number; }) {
+export async function createMessage(input: {
+  conversationId: number;
+  role: "user" | "assistant";
+  content: string;
+  imageData?: string | null;
+  tokenCount?: number;
+}) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   const [row] = await db
@@ -478,10 +486,66 @@ export async function createMessage(input: { conversationId: number; role: "user
       conversationId: input.conversationId,
       role: input.role,
       content: input.content,
+      imageData: input.imageData ?? null,
       tokenCount: input.tokenCount ?? null,
     })
     .returning();
   return row;
+}
+
+/** Starter plan: first N stored messages in the latest conversation. */
+export const WEB_CHAT_STARTER_MEMORY_LIMIT = 20;
+
+export type WebChatHistoryMessage = {
+  role: string;
+  content: string;
+  imageData?: string | null;
+};
+
+/**
+ * Plan-based chat restore for web UI.
+ * - Pro: all messages since subscriptionStart in the latest conversation
+ * - Starter: first 20 messages (10 user + 10 assistant pairs) in the latest conversation
+ * - Free: full latest conversation (UI may still cap display locally)
+ */
+export async function listWebChatHistoryForAdvisor(
+  userId: number,
+  modelSlug: "bizpilot" | "founderpilot",
+): Promise<{ conversationId: number | null; messages: WebChatHistoryMessage[] }> {
+  const convs = await listUserConversations(userId, modelSlug, 1);
+  if (convs.length === 0) {
+    return { conversationId: null, messages: [] };
+  }
+  const conv = convs[0]!;
+  const usage = await getMessageUsage(userId, modelSlug);
+  let rows = await listConversationMessages(conv.id);
+
+  if (usage.planType === "pro") {
+    const fullUser = await getUserById(userId);
+    const activation = fullUser?.subscriptionStart;
+    if (activation) {
+      const activationMs =
+        activation instanceof Date ? activation.getTime() : Number(activation);
+      if (Number.isFinite(activationMs)) {
+        rows = rows.filter((m: { createdAt?: Date | number | null }) => {
+          const created =
+            m.createdAt instanceof Date ? m.createdAt.getTime() : Number(m.createdAt);
+          return Number.isFinite(created) && created >= activationMs;
+        });
+      }
+    }
+  } else if (usage.planType === "starter") {
+    rows = rows.slice(0, WEB_CHAT_STARTER_MEMORY_LIMIT);
+  }
+
+  return {
+    conversationId: conv.id,
+    messages: rows.map((m: { role: string; content: string; imageData?: string | null }) => ({
+      role: m.role,
+      content: m.content,
+      imageData: (m as { imageData?: string | null }).imageData ?? null,
+    })),
+  };
 }
 
 export async function touchConversation(conversationId: number) {
@@ -1149,9 +1213,6 @@ export function hasTelegramCredits(
   return limit > 0;
 }
 
-/** Max stored messages (user + assistant); ~20 full exchanges for paid Telegram packs. */
-const MAX_TELEGRAM_LLM_TURNS = 40;
-
 const MAX_TELEGRAM_TURN_CHARS = 12000;
 
 function clipTelegramTurnContent(text: string): string {
@@ -1166,7 +1227,7 @@ export async function listRecentTelegramLlmTurnsForAdvisor(
 ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
   const db = await getDb();
   if (!db) return [];
-  const cap = Math.min(Math.max(1, maxMessages), MAX_TELEGRAM_LLM_TURNS);
+  const cap = Math.max(1, maxMessages);
   try {
     const rows = await db
       .select({
@@ -1218,21 +1279,6 @@ export async function appendTelegramLlmTurnPair(
         createdAt: now,
       },
     ]);
-
-    const ids = await db
-      .select({ id: telegramLlmTurns.id })
-      .from(telegramLlmTurns)
-      .where(and(eq(telegramLlmTurns.userId, userId), eq(telegramLlmTurns.advisor, advisor)))
-      .orderBy(desc(telegramLlmTurns.createdAt));
-
-    const toDrop = ids.slice(MAX_TELEGRAM_LLM_TURNS);
-    if (toDrop.length === 0) return;
-    await db.delete(telegramLlmTurns).where(
-      inArray(
-        telegramLlmTurns.id,
-        toDrop.map((r) => r.id),
-      ),
-    );
   } catch (err) {
     console.error("[db] appendTelegramLlmTurnPair (telegram_llm_turns) failed:", err);
   }

@@ -2,9 +2,10 @@ import { useState, useRef, useEffect } from "react";
 import { DashboardShell } from "@/components/DashboardShell";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation } from "wouter";
-import { Send, Plus, MessageSquare, Lock, Brain, User } from "lucide-react";
-import { Streamdown } from "streamdown";
+import { Plus, MessageSquare, Lock, Brain, User } from "lucide-react";
 import { useAdvisorChat } from "@/hooks/useAdvisorChat";
+import { AdvisorChatComposer } from "@/components/AdvisorChatComposer";
+import { AdvisorChatMessage } from "@/components/AdvisorChatMessage";
 
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
@@ -170,7 +171,7 @@ export default function FounderPilot() {
                 ) : (
                   <div className="grid grid-cols-1 gap-2 w-full max-w-md">
                     {QUICK_PROMPTS.map((p) => (
-                      <button key={p} onClick={() => handleSend(p, () => setInput(""))}
+                      <button key={p} onClick={() => { setInput(""); handleSend(p); }}
                         className="text-left px-4 py-2.5 rounded-xl text-xs transition"
                         style={{ background: "oklch(18% 0.05 220)", border: "1px solid oklch(75% 0.18 55 / 0.2)", color: "oklch(70% 0.03 220)" }}>
                         {p}
@@ -181,24 +182,28 @@ export default function FounderPilot() {
               </div>
             ) : (
               messages.map((msg, i) => (
-                <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  {msg.role === "assistant" && (
-                    <div
-                      className="ph-logo-frame ph-logo-frame--nav w-7 h-7 rounded-lg flex-shrink-0 mt-1"
-                      style={{ background: "oklch(20% 0.05 220)", boxShadow: "0 0 8px oklch(75% 0.18 55 / 0.4)", border: "1px solid oklch(75% 0.18 55 / 0.25)" }}
-                    >
-                      <img src={LOGO_URL} alt="" className="ph-logo-frame__img rounded-md" />
-                    </div>
-                  )}
-                  <div className="max-w-[85%] sm:max-w-[75%] md:max-w-[65%] px-3 sm:px-4 py-2 sm:py-3 rounded-2xl text-xs sm:text-sm leading-relaxed break-words"
-                    style={msg.role === "user" ? {
-                      background: "oklch(75% 0.18 55 / 0.15)", border: "1px solid oklch(75% 0.18 55 / 0.25)", color: "white", borderBottomRightRadius: "4px"
-                    } : {
-                      background: "oklch(18% 0.05 220)", border: "1px solid oklch(25% 0.04 220)", color: "oklch(88% 0.02 220)", borderBottomLeftRadius: "4px"
-                    }}>
-                    {msg.role === "assistant" ? <Streamdown>{msg.content}</Streamdown> : msg.content}
-                  </div>
-                </div>
+                <AdvisorChatMessage
+                  key={i}
+                  msg={msg}
+                  logoUrl={LOGO_URL}
+                  logoFrameStyle={{
+                    background: "oklch(20% 0.05 220)",
+                    boxShadow: "0 0 8px oklch(75% 0.18 55 / 0.4)",
+                    border: "1px solid oklch(75% 0.18 55 / 0.25)",
+                  }}
+                  userBubbleStyle={{
+                    background: "oklch(75% 0.18 55 / 0.15)",
+                    border: "1px solid oklch(75% 0.18 55 / 0.25)",
+                    color: "white",
+                    borderBottomRightRadius: "4px",
+                  }}
+                  assistantBubbleStyle={{
+                    background: "oklch(18% 0.05 220)",
+                    border: "1px solid oklch(25% 0.04 220)",
+                    color: "oklch(88% 0.02 220)",
+                    borderBottomLeftRadius: "4px",
+                  }}
+                />
               ))
             )}
             {sending && (
@@ -235,18 +240,16 @@ export default function FounderPilot() {
                 </button>
               </div>
             ) : (
-              <div className="flex gap-2 sm:gap-3 items-end">
-                <textarea value={input} onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(input, () => setInput("")); } }}
-                  placeholder="FounderPilot ကို မေးချင်တာ ရိုက်ထည့်ပါ..." rows={1}
-                  className="flex-1 px-3 sm:px-4 py-2 sm:py-3 rounded-xl text-xs sm:text-sm resize-none outline-none text-white"
-                  style={{ background: "oklch(20% 0.05 220)", border: "1px solid oklch(75% 0.18 55 / 0.2)", maxHeight: "120px" }} />
-                <button onClick={() => handleSend(input, () => setInput(""))} disabled={!input.trim() || sending}
-                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition"
-                  style={{ background: input.trim() && !sending ? "oklch(75% 0.18 55)" : "oklch(25% 0.04 220)", boxShadow: input.trim() && !sending ? "0 0 14px oklch(75% 0.18 55 / 0.4)" : "none" }}>
-                  <Send className="w-3.5 sm:w-4 h-3.5 sm:h-4" style={{ color: input.trim() && !sending ? "oklch(12% 0.03 220)" : "oklch(45% 0.03 220)" }} />
-                </button>
-              </div>
+              <AdvisorChatComposer
+                value={input}
+                onChange={setInput}
+                onSend={(text, image) => handleSend(text, image)}
+                sending={sending}
+                placeholder="FounderPilot ကို မေးချင်တာ ရိုက်ထည့်ပါ... (ပုံ paste လုပ်နိုင်ပါသည်)"
+                accentColor="oklch(75% 0.18 55)"
+                accentGlow="0 0 14px oklch(75% 0.18 55 / 0.4)"
+                borderColor="oklch(75% 0.18 55 / 0.2)"
+              />
             )}
           </div>
         </div>

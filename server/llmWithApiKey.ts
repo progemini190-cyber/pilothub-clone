@@ -2,48 +2,57 @@
  * LLM invoker that uses API keys stored in the database.
  * Falls back to the built-in platform LLM if no custom key is configured.
  *
- * FIXES APPLIED:
- * 1. Temperature hardcoded to 0.3 to prevent hallucinations
- * 2. System prompt passed via systemInstruction (Gemini) or system role (OpenAI)
- * 3. Message role mapping: assistant→model for Gemini, consecutive same-role deduplication
+ * Supports multimodal (vision) user turns via base64 image payloads.
  */
 import { getActiveApiKey, getAiModel } from "./db";
 import type { InvokeResult } from "./_core/llm";
 import { invokeLLM } from "./_core/llm";
+import {
+  isVisionCapableGeminiModel,
+  parseImagePayload,
+  type LlmMessage,
+} from "@shared/llmChat";
 
 export type AdvisorSlug = "bizpilot" | "founderpilot";
 
-// Strict temperature to prevent hallucinations and keep grounded business advice
 const TEMPERATURE = 0.3;
 const MAX_OUTPUT_TOKENS = 4096;
+const DEFAULT_VISION_MODEL = "gemini-1.5-flash-latest";
 
-/**
- * Invoke LLM for a specific advisor, using:
- * 1. Gemini API key from DB (preferred if model is gemini-*)
- * 2. OpenAI API key from DB (preferred if model is gpt-*)
- * 3. Built-in platform LLM (fallback)
- */
+function chatHasImages(msgs: LlmMessage[]): boolean {
+  return msgs.some((m) => m.role !== "system" && Boolean(m.imageBase64?.trim()));
+}
+
+function resolveGeminiModel(configured: string, hasImages: boolean): string {
+  if (hasImages && !isVisionCapableGeminiModel(configured)) {
+    return DEFAULT_VISION_MODEL;
+  }
+  return configured;
+}
+
 export async function invokeAdvisorLLM(
   advisorSlug: AdvisorSlug,
-  messages: Array<{ role: string; content: string }>
+  messages: LlmMessage[],
 ): Promise<string> {
-  // Get the configured model for this advisor
   const aiModel = await getAiModel(advisorSlug);
-  const modelString = aiModel?.modelString ?? "gemini-2.5-pro-preview-05-06";
-
+  const configuredModel = aiModel?.modelString ?? DEFAULT_VISION_MODEL;
+  const hasImages = chatHasImages(messages);
+  const modelString = resolveGeminiModel(configuredModel, hasImages);
   const isGeminiModel = modelString.startsWith("gemini");
 
-  // Extract system message — must be passed separately, NOT as a chat turn
-  const systemMsg = messages.find(m => m.role === "system");
+  const systemMsg = messages.find((m) => m.role === "system");
   const systemPromptText = systemMsg?.content ?? "";
 
-  // Build chat messages (exclude system message from the chat turns)
   const chatMessages = messages
-    .filter(m => m.role !== "system")
-    .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+    .filter((m) => m.role !== "system")
+    .map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+      imageBase64: m.imageBase64,
+      imageMimeType: m.imageMimeType,
+    }));
 
   if (isGeminiModel) {
-    // Prefer Gemini key for Gemini models
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
       try {
@@ -58,7 +67,6 @@ export async function invokeAdvisorLLM(
       }
     }
   } else {
-    // Prefer OpenAI key for GPT models
     const openaiKey = await getActiveApiKey("openai");
     if (openaiKey?.keyValue) {
       try {
@@ -73,13 +81,12 @@ export async function invokeAdvisorLLM(
       }
     }
 
-    // Try Gemini as fallback for OpenAI models
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
       try {
         return await invokeWithGemini({
           apiKey: geminiKey.keyValue,
-          model: "gemini-2.5-pro-preview-05-06",
+          model: resolveGeminiModel(DEFAULT_VISION_MODEL, hasImages),
           systemPrompt: systemPromptText,
           chatMessages,
         });
@@ -89,33 +96,51 @@ export async function invokeAdvisorLLM(
     }
   }
 
-  // Final fallback: built-in platform LLM (passes full messages including system)
-  const fallbackMessages = messages.map(m => ({ role: m.role as "system" | "user" | "assistant", content: m.content }));
+  const fallbackMessages = messages.map((m) => ({
+    role: m.role as "system" | "user" | "assistant",
+    content: m.content,
+  }));
   const response = await invokeLLM({ messages: fallbackMessages });
   const content = response.choices[0]?.message?.content;
   return typeof content === "string" ? content : "Sorry, I could not generate a response.";
 }
 
-/**
- * Invoke OpenAI-compatible API.
- * System prompt is passed as the first message with role="system".
- */
+type ChatTurn = {
+  role: "user" | "assistant";
+  content: string;
+  imageBase64?: string;
+  imageMimeType?: string;
+};
+
 async function invokeWithOpenAI(params: {
   apiKey: string;
   model: string;
   systemPrompt: string;
-  chatMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  chatMessages: ChatTurn[];
 }): Promise<string> {
-  // Build messages: system first, then chat history
-  const messages: Array<{ role: string; content: string }> = [];
+  const messages: Array<Record<string, unknown>> = [];
 
   if (params.systemPrompt) {
     messages.push({ role: "system", content: params.systemPrompt });
   }
 
-  // Add chat messages, ensuring no consecutive same-role messages
   const sanitizedChat = sanitizeChatMessages(params.chatMessages);
-  messages.push(...sanitizedChat);
+  for (const msg of sanitizedChat) {
+    const image = parseImagePayload(msg.imageBase64);
+    if (image && msg.role === "user") {
+      const parts: Array<Record<string, unknown>> = [];
+      if (msg.content.trim()) {
+        parts.push({ type: "text", text: msg.content });
+      }
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${image.mimeType};base64,${image.base64}` },
+      });
+      messages.push({ role: "user", content: parts });
+    } else {
+      messages.push({ role: msg.role, content: msg.content });
+    }
+  }
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -136,34 +161,44 @@ async function invokeWithOpenAI(params: {
     throw new Error(`OpenAI API error: ${response.status} – ${errorText}`);
   }
 
-  const data = await response.json() as InvokeResult;
+  const data = (await response.json()) as InvokeResult;
   const content = data.choices[0]?.message?.content;
   return typeof content === "string" ? content : "No response";
 }
 
-/**
- * Invoke Google Gemini API.
- *
- * CRITICAL: System prompt MUST be passed via systemInstruction, NOT as a chat turn.
- * Temperature is hardcoded to 0.3 to prevent hallucinations.
- * Message roles: "user" and "model" only (no "assistant" or "system" in contents).
- */
+function buildGeminiParts(msg: ChatTurn): Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> {
+  const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+  if (msg.content.trim()) {
+    parts.push({ text: msg.content });
+  }
+  const image = parseImagePayload(msg.imageBase64);
+  if (image) {
+    parts.push({
+      inlineData: {
+        mimeType: image.mimeType,
+        data: image.base64,
+      },
+    });
+  }
+  if (parts.length === 0) {
+    parts.push({ text: "(no text)" });
+  }
+  return parts;
+}
+
 async function invokeWithGemini(params: {
   apiKey: string;
   model: string;
   systemPrompt: string;
-  chatMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  chatMessages: ChatTurn[];
 }): Promise<string> {
-  // Sanitize: remove consecutive same-role messages (Gemini requires strict alternation)
   const sanitizedChat = sanitizeChatMessages(params.chatMessages);
 
-  // Map roles: "assistant" → "model" (Gemini uses "model" not "assistant")
-  const geminiContents = sanitizedChat.map(m => ({
+  const geminiContents = sanitizedChat.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
+    parts: buildGeminiParts(m),
   }));
 
-  // Ensure the last message is from "user" (Gemini requires ending with user turn)
   if (geminiContents.length === 0 || geminiContents[geminiContents.length - 1].role !== "user") {
     throw new Error("Gemini requires the last message to be from the user");
   }
@@ -180,7 +215,6 @@ async function invokeWithGemini(params: {
     },
   };
 
-  // CRITICAL FIX: System prompt via systemInstruction (separate from chat turns)
   if (params.systemPrompt && params.systemPrompt.trim().length > 0) {
     body.systemInstruction = {
       role: "user",
@@ -199,9 +233,11 @@ async function invokeWithGemini(params: {
     throw new Error(`Gemini API error: ${response.status} – ${errorText}`);
   }
 
-  const data = await response.json() as any;
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    promptFeedback?: { blockReason?: string };
+  };
 
-  // Check for safety blocks or empty responses
   const candidate = data?.candidates?.[0];
   if (!candidate) {
     const blockReason = data?.promptFeedback?.blockReason;
@@ -209,30 +245,24 @@ async function invokeWithGemini(params: {
   }
 
   const text = candidate?.content?.parts?.[0]?.text;
-  return typeof text === "string" && text.trim().length > 0
-    ? text
-    : "No response generated.";
+  return typeof text === "string" && text.trim().length > 0 ? text : "No response generated.";
 }
 
-/**
- * Sanitize chat messages to ensure strict user/assistant alternation.
- * Gemini requires: user, model, user, model, ... (no consecutive same roles)
- * If consecutive same-role messages exist, merge them with a newline separator.
- */
-function sanitizeChatMessages(
-  messages: Array<{ role: "user" | "assistant"; content: string }>
-): Array<{ role: "user" | "assistant"; content: string }> {
+function sanitizeChatMessages(messages: ChatTurn[]): ChatTurn[] {
   if (messages.length === 0) return messages;
 
-  const result: Array<{ role: "user" | "assistant"; content: string }> = [];
+  const result: ChatTurn[] = [];
 
   for (const msg of messages) {
     const last = result[result.length - 1];
     if (last && last.role === msg.role) {
-      // Merge consecutive same-role messages
       last.content = `${last.content}\n\n${msg.content}`;
+      if (msg.imageBase64 && !last.imageBase64) {
+        last.imageBase64 = msg.imageBase64;
+        last.imageMimeType = msg.imageMimeType;
+      }
     } else {
-      result.push({ role: msg.role, content: msg.content });
+      result.push({ ...msg });
     }
   }
 

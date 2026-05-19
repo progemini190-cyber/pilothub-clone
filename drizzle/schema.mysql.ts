@@ -131,6 +131,7 @@ export const messages = mysqlTable("messages", {
   conversationId: int("conversationId").notNull(),
   role: varchar("role", { length: 64 }).notNull(),
   content: text("content").notNull(),
+  imageData: text("imageData"),
   tokenCount: int("tokenCount"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 });

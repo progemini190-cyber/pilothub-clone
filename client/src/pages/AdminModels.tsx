@@ -8,7 +8,9 @@ import { toast } from "sonner";
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 const GEMINI_MODELS = [
-  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (Recommended)" },
+  { value: "gemini-1.5-flash-latest", label: "Gemini 1.5 Flash (Vision, Recommended)" },
+  { value: "gemini-1.5-pro-latest", label: "Gemini 1.5 Pro (Vision)" },
+  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
   { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
   { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
   { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },

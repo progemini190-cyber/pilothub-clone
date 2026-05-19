@@ -232,6 +232,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
       await ensureAuthSchema().catch((err) =>
         console.warn("[Database] Auth schema migration skipped:", err),
       );
+      const { ensureChatSchema } = await import("./ensureChatSchema");
+      await ensureChatSchema().catch((err) =>
+        console.warn("[Database] Chat schema migration skipped:", err),
+      );
       return _db;
     }
   }
@@ -268,6 +272,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
           await ensureAuthSchema().catch((err) =>
             console.warn("[Database] Auth schema migration skipped:", err),
           );
+          const { ensureChatSchema } = await import("./ensureChatSchema");
+          await ensureChatSchema().catch((err) =>
+            console.warn("[Database] Chat schema migration skipped:", err),
+          );
           return _db;
         }
       }
@@ -296,6 +304,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
       await ensureAuthSchema().catch((err) =>
         console.warn("[Database] Auth schema migration skipped:", err),
       );
+      const { ensureChatSchema } = await import("./ensureChatSchema");
+      await ensureChatSchema().catch((err) =>
+        console.warn("[Database] Chat schema migration skipped:", err),
+      );
       return _db;
     }
   }
@@ -320,6 +332,10 @@ export async function initializeDatabase(): Promise<AppDatabase | null> {
         const { ensureAuthSchema } = await import("./ensureAuthSchema");
         await ensureAuthSchema().catch((err) =>
           console.warn("[Database] Auth schema migration skipped:", err),
+        );
+        const { ensureChatSchema } = await import("./ensureChatSchema");
+        await ensureChatSchema().catch((err) =>
+          console.warn("[Database] Chat schema migration skipped:", err),
         );
         return _db;
       }

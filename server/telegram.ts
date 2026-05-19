@@ -11,6 +11,7 @@ import * as db from "./db";
 import type { AdvisorSlug } from "./db";
 import { ensureTelegramSchema } from "./db/ensureTelegramSchema";
 import { invokeAdvisorLLM } from "./llmWithApiKey";
+import { appendAdvisorSafetyPrompt } from "@shared/chatSafety";
 import {
   buildTelegramStartLink,
   resolveTelegramActivationBotUsername,
@@ -293,7 +294,10 @@ async function handleChatMessage(
   const history = await db.listRecentTelegramLlmTurnsForAdvisor(user.id, advisorSlug, 40);
 
   const llmMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-    { role: "system", content: (systemPrompt || fallback) + profileCtx },
+    {
+      role: "system",
+      content: appendAdvisorSafetyPrompt((systemPrompt || fallback) + profileCtx, advisorSlug),
+    },
     ...history.map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: userText },
   ];

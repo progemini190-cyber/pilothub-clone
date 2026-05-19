@@ -4,7 +4,7 @@ import { publicProcedure, router, protectedProcedure, approvedProcedure } from "
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import * as db from "./db";
-import { invokeAdvisorLLM } from "./llmWithApiKey";
+import { advisorChatInputSchema, runAdvisorChatMutation } from "./advisorChat";
 import {
   generateTelegramActivationToken,
   setupTelegramWebhook,
@@ -226,30 +226,17 @@ export const appRouter = router({
       return { biz, founder };
     }),
 
-    /** Latest conversation + messages for web chat restore on mount. */
+    /** Latest conversation + plan-scoped messages for web chat restore on mount. */
     getHistory: approvedProcedure
       .input(z.object({ modelSlug: z.enum(["bizpilot", "founderpilot"]) }))
       .query(async ({ ctx, input }) => {
-        const convs = await db.listUserConversations(ctx.user.id, input.modelSlug, 1);
-        if (convs.length === 0) {
-          return { conversationId: null as number | null, messages: [] as Array<{ role: string; content: string }> };
-        }
-        const conv = convs[0]!;
-        const msgs = await db.listConversationMessages(conv.id);
-        return {
-          conversationId: conv.id,
-          messages: msgs.map((m: { role: string; content: string }) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        };
+        return await db.listWebChatHistoryForAdvisor(ctx.user.id, input.modelSlug);
       }),
 
     bizpilot: approvedProcedure
-      .input(z.object({ message: z.string().min(1).max(10000), conversationId: z.number().optional() }))
+      .input(advisorChatInputSchema)
       .mutation(async ({ ctx, input }) => {
         const user = ctx.user;
-        // ── Tiered message limit check ──
         const usage = await db.getMessageUsage(user.id, "bizpilot");
         if (usage.used >= usage.limit) {
           throw new TRPCError({
@@ -264,45 +251,13 @@ export const appRouter = router({
             }),
           });
         }
-        const conv = await db.getOrCreateConversation({ userId: user.id, modelSlug: "bizpilot", conversationId: input.conversationId });
-        await db.createMessage({ conversationId: conv.id, role: "user", content: input.message });
-        const history = await db.listConversationMessages(conv.id);
-        const recentHistory = history.slice(-20);
-        const systemPrompt = await db.getActiveSystemPrompt("bizpilot");
-        const fullUser = await db.getUserById(user.id);
-        const userProfileLines = [
-          `\n\n[User Profile]`,
-          `- Name: ${fullUser?.name ?? user.name ?? "Unknown"}`,
-          fullUser?.businessName ? `- Business Name: ${fullUser.businessName}` : null,
-          (fullUser as any)?.businessType ? `- Business Type: ${(fullUser as any).businessType}` : null,
-          (fullUser as any)?.useCase ? `- How they use PilotHub: ${(fullUser as any).useCase}` : null,
-          `- Plan: ${usage.planType}`,
-        ].filter(Boolean);
-        const userProfileCtx = userProfileLines.join("\n");
-        const olderHistory = history.slice(0, Math.max(0, history.length - 21));
-        const memoryNote = olderHistory.length > 0
-          ? `\n\n[Conversation Memory: ${history.length} total messages. Earlier: ${olderHistory.slice(-5).map(m => `${m.role === "user" ? "User" : "AI"}: ${m.content.slice(0, 120)}`).join(" | ")}]`
-          : "";
-        const llmMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-          { role: "system", content: (systemPrompt || "You are BizPilot, an expert business advisor for Myanmar businesses.") + userProfileCtx + memoryNote },
-          ...recentHistory.slice(0, -1).map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-          { role: "user", content: input.message },
-        ];
-        const assistantMessage = await invokeAdvisorLLM("bizpilot", llmMessages);
-        await db.createMessage({ conversationId: conv.id, role: "assistant", content: assistantMessage });
-        await db.touchConversation(conv.id);
-        if (history.length <= 1) await db.updateConversationTitle(conv.id, input.message.slice(0, 80));
-        // Increment message counter
-        await db.incrementMessageUsed(user.id, "bizpilot");
-        const newUsage = await db.getMessageUsage(user.id, "bizpilot");
-        return { conversationId: conv.id, message: assistantMessage, usage: newUsage };
+        return await runAdvisorChatMutation("bizpilot", user, input);
       }),
 
     founderpilot: approvedProcedure
-      .input(z.object({ message: z.string().min(1).max(10000), conversationId: z.number().optional() }))
+      .input(advisorChatInputSchema)
       .mutation(async ({ ctx, input }) => {
         const user = ctx.user;
-        // ── Tiered message limit check ──
         const usage = await db.getMessageUsage(user.id, "founderpilot");
         if (usage.used >= usage.limit) {
           throw new TRPCError({
@@ -317,38 +272,7 @@ export const appRouter = router({
             }),
           });
         }
-        const conv = await db.getOrCreateConversation({ userId: user.id, modelSlug: "founderpilot", conversationId: input.conversationId });
-        await db.createMessage({ conversationId: conv.id, role: "user", content: input.message });
-        const history = await db.listConversationMessages(conv.id);
-        const recentHistory = history.slice(-20);
-        const systemPrompt = await db.getActiveSystemPrompt("founderpilot");
-        const fullUser = await db.getUserById(user.id);
-        const userProfileLines = [
-          `\n\n[User Profile]`,
-          `- Name: ${fullUser?.name ?? user.name ?? "Unknown"}`,
-          fullUser?.businessName ? `- Business Name: ${fullUser.businessName}` : null,
-          (fullUser as any)?.businessType ? `- Business Type: ${(fullUser as any).businessType}` : null,
-          (fullUser as any)?.useCase ? `- How they use PilotHub: ${(fullUser as any).useCase}` : null,
-          `- Plan: ${usage.planType}`,
-        ].filter(Boolean);
-        const userProfileCtx = userProfileLines.join("\n");
-        const olderHistory = history.slice(0, Math.max(0, history.length - 21));
-        const memoryNote = olderHistory.length > 0
-          ? `\n\n[Conversation Memory: ${history.length} total messages. Earlier: ${olderHistory.slice(-5).map(m => `${m.role === "user" ? "User" : "AI"}: ${m.content.slice(0, 120)}`).join(" | ")}]`
-          : "";
-        const llmMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-          { role: "system", content: (systemPrompt || "You are FounderPilot, a strategic advisor for founders and CEOs.") + userProfileCtx + memoryNote },
-          ...recentHistory.slice(0, -1).map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-          { role: "user", content: input.message },
-        ];
-        const assistantMessage = await invokeAdvisorLLM("founderpilot", llmMessages);
-        await db.createMessage({ conversationId: conv.id, role: "assistant", content: assistantMessage });
-        await db.touchConversation(conv.id);
-        if (history.length <= 1) await db.updateConversationTitle(conv.id, input.message.slice(0, 80));
-        // Increment message counter
-        await db.incrementMessageUsed(user.id, "founderpilot");
-        const newUsage = await db.getMessageUsage(user.id, "founderpilot");
-        return { conversationId: conv.id, message: assistantMessage, usage: newUsage };
+        return await runAdvisorChatMutation("founderpilot", user, input);
       }),
   }),
 

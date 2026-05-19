@@ -38,8 +38,8 @@ const SKIP_SEEDS = args.has("--skip-seeds");
 
 /** Default model strings used when `aiModels` table is empty (see server/llmWithApiKey.ts). */
 const DEFAULT_AI_MODELS = [
-  { targetRole: "bizpilot", modelString: "gemini-2.5-pro-preview-05-06" },
-  { targetRole: "founderpilot", modelString: "gemini-2.5-pro-preview-05-06" },
+  { targetRole: "bizpilot", modelString: "gemini-1.5-flash-latest" },
+  { targetRole: "founderpilot", modelString: "gemini-1.5-flash-latest" },
 ] as const;
 
 const TABLES_FROM_JSON = [

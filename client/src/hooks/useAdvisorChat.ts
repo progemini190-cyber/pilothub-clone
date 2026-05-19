@@ -2,14 +2,19 @@ import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
-export type ChatMessage = { role: "user" | "assistant"; content: string };
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  imageData?: string | null;
+};
 
 function mapMessages(
-  msgs: Array<{ role: string; content: string }>,
+  msgs: Array<{ role: string; content: string; imageData?: string | null }>,
 ): ChatMessage[] {
   return msgs.map((m) => ({
     role: m.role as "user" | "assistant",
     content: m.content,
+    imageData: m.imageData ?? null,
   }));
 }
 
@@ -60,6 +65,7 @@ export function useAdvisorChat(modelSlug: "bizpilot" | "founderpilot", userId: n
       setSending(false);
       usageQuery.refetch();
       conversationsQuery.refetch();
+      historyQuery.refetch();
     },
     onError: (err) => {
       setSending(false);
@@ -76,7 +82,6 @@ export function useAdvisorChat(modelSlug: "bizpilot" | "founderpilot", userId: n
     { enabled: !!conversationId, staleTime: 5000 },
   );
 
-  // Restore latest conversation on mount (survives plan upgrades / refetches).
   useEffect(() => {
     if (historyHydratedRef.current || !historyQuery.data) return;
     const { conversationId: cid, messages: msgs } = historyQuery.data;
@@ -87,7 +92,6 @@ export function useAdvisorChat(modelSlug: "bizpilot" | "founderpilot", userId: n
     }
   }, [historyQuery.data, conversationId, messages.length]);
 
-  // Load messages when user picks a conversation from the sidebar.
   useEffect(() => {
     const data = conversationDetailQuery.data;
     if (!data?.messages || conversationId == null) return;
@@ -98,23 +102,34 @@ export function useAdvisorChat(modelSlug: "bizpilot" | "founderpilot", userId: n
     }
   }, [conversationDetailQuery.data, conversationId]);
 
-  const handleSend = (text: string, inputClear: () => void) => {
+  const handleSend = (text: string, imageDataUrl?: string) => {
     const msg = text.trim();
-    if (!msg || sending) return;
+    if ((!msg && !imageDataUrl) || sending) return;
     if (isLimitReached) {
       setShowLimitModal(true);
       return;
     }
-    setMessages((prev) => [...prev, { role: "user", content: msg }]);
-    inputClear();
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "user",
+        content: msg || "[Image attached]",
+        imageData: imageDataUrl ?? null,
+      },
+    ]);
     setSending(true);
-    sendMutation.mutate({ message: msg, conversationId });
+    sendMutation.mutate({
+      message: msg,
+      conversationId,
+      imageBase64: imageDataUrl,
+    });
   };
 
   const handleNewChat = () => {
     setMessages([]);
     setConversationId(undefined);
     loadingConversationIdRef.current = null;
+    historyHydratedRef.current = false;
   };
 
   const loadConversation = (convId: number) => {
