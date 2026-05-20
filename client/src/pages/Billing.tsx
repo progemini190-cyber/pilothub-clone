@@ -106,7 +106,6 @@ export default function Billing() {
   }, []);
 
   const { data: paymentSettings } = trpc.payments.settings.useQuery();
-  const uploadScreenshot = trpc.payments.uploadScreenshot.useMutation();
   const submitPayment = trpc.payments.submit.useMutation({
     onSuccess: () => {
       setSubmitted(true);
@@ -145,22 +144,16 @@ export default function Billing() {
     }
     setSubmitting(true);
     try {
-      let screenshotUrl: string | undefined;
+      let screenshotDataUrl: string | undefined;
       if (screenshotFile) {
-        const { base64, contentType } = await compressImageToBase64UnderLimit(screenshotFile);
-        const ext = contentType.includes("png") ? "png" : "jpg";
-        const result = await uploadScreenshot.mutateAsync({
-          filename: screenshotFile.name.replace(/\.\w+$/, "") + `.${ext}`,
-          contentType,
-          dataBase64: base64,
-        });
-        screenshotUrl = result.url;
+        const { previewDataUrl } = await compressImageToBase64UnderLimit(screenshotFile);
+        screenshotDataUrl = previewDataUrl;
       }
       await submitPayment.mutateAsync({
         plan: selectedPlan as any,
         paymentMethod: selectedPayment,
         transactionRef: transactionRef.trim() || undefined,
-        screenshotUrl,
+        screenshotDataUrl,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Submission failed. Please try again.";

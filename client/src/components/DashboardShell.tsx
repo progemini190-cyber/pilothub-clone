@@ -256,6 +256,19 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
           {title && (
             <h1 className="hidden md:block text-base font-bold text-white flex-1 min-w-0 ml-1 truncate" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{title}</h1>
           )}
+          {!isAdminShell && user && (
+            <a
+              href={getTelegramCustomerSupportUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs sm:text-sm font-semibold transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 bg-[#0088cc] text-white"
+              style={{ boxShadow: "0 4px 12px rgba(0, 136, 204, 0.35)" }}
+              aria-label="Open support on Telegram"
+            >
+              <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" aria-hidden />
+              <span className="leading-none">Support</span>
+            </a>
+          )}
           {isAdminShell && (
             <span className="hidden md:inline-flex flex-shrink-0 ml-auto px-1.5 sm:px-2 py-0.5 rounded text-xs font-bold"
               style={{ background: "oklch(60% 0.22 25 / 0.2)", color: "oklch(75% 0.18 25)", border: "1px solid oklch(60% 0.22 25 / 0.3)" }}>
@@ -276,21 +289,6 @@ export function DashboardShell({ children, title, activeTab, isAdminShell }: Das
         </div>
       </div>
 
-      {!isAdminShell && user && (
-        <a
-          href={getTelegramCustomerSupportUrl()}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="fixed top-20 right-4 z-40 flex items-center gap-2 rounded-full px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 sm:top-24 sm:right-6 sm:px-5 sm:py-3.5 bg-[#0088cc]"
-          style={{ boxShadow: "0 8px 24px rgba(0, 136, 204, 0.45)" }}
-          aria-label="Customer support သို့ ဆက်သွယ်ရန် — Telegram"
-        >
-          <MessageCircle className="w-5 h-5 flex-shrink-0" aria-hidden />
-          <span className="max-w-[11rem] sm:max-w-none leading-tight">
-            Customer support သို့ ဆက်သွယ်ရန်
-          </span>
-        </a>
-      )}
     </div>
   );
 }

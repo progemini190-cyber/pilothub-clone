@@ -4239,7 +4239,10 @@ var appRouter = router({
       plan: z2.enum(["bizpilot", "founderpilot", "bizpilot-starter", "bizpilot-pro", "founderpilot-starter", "founderpilot-pro"]),
       paymentMethod: z2.string(),
       transactionRef: z2.string().optional(),
-      screenshotUrl: z2.string().optional()
+      screenshotDataUrl: z2.string().optional().refine(
+        (value) => value === void 0 || value.startsWith("data:image/"),
+        "Screenshot must be a data:image/... URL"
+      )
     })).mutation(async ({ ctx, input }) => {
       const amounts = {
         "bizpilot": 1e5,
@@ -4257,7 +4260,7 @@ var appRouter = router({
         amount: amounts[input.plan] ?? 0,
         paymentMethod: input.paymentMethod,
         transactionRef: input.transactionRef,
-        screenshotUrl: input.screenshotUrl,
+        screenshotUrl: input.screenshotDataUrl,
         source: "website"
       });
       try {
@@ -4271,17 +4274,6 @@ Ref: ${input.transactionRef ?? "N/A"}`
       } catch (e) {
       }
       return { success: true, paymentId: payment.id };
-    }),
-    // Upload screenshot
-    uploadScreenshot: protectedProcedure.input(z2.object({
-      filename: z2.string(),
-      contentType: z2.string(),
-      dataBase64: z2.string()
-    })).mutation(async ({ ctx, input }) => {
-      const buffer = Buffer.from(input.dataBase64, "base64");
-      const key = `payment-screenshots/${ctx.user.id}-${Date.now()}-${input.filename}`;
-      const { url } = await storagePut(key, buffer, input.contentType);
-      return { url };
     }),
     myPayments: protectedProcedure.query(async ({ ctx }) => {
       const userPayments = await listUserPayments(ctx.user.id);

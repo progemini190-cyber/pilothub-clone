@@ -12,7 +12,6 @@ import {
 } from "./telegram";
 import { quickCreateTelegramUser } from "./quickCreateUser";
 import { notifyOwner } from "./_core/notification";
-import { storagePut } from "./storage";
 import {
   sendApprovalEmail as sendApprovalEmailHelper,
   sendPaymentConfirmationEmail,
@@ -307,7 +306,13 @@ export const appRouter = router({
         plan: z.enum(["bizpilot", "founderpilot", "bizpilot-starter", "bizpilot-pro", "founderpilot-starter", "founderpilot-pro"]),
         paymentMethod: z.string(),
         transactionRef: z.string().optional(),
-        screenshotUrl: z.string().optional(),
+        screenshotDataUrl: z
+          .string()
+          .optional()
+          .refine(
+            (value) => value === undefined || value.startsWith("data:image/"),
+            "Screenshot must be a data:image/... URL",
+          ),
       }))
       .mutation(async ({ ctx, input }) => {
         const amounts: Record<string, number> = {
@@ -323,7 +328,7 @@ export const appRouter = router({
           amount: amounts[input.plan] ?? 0,
           paymentMethod: input.paymentMethod,
           transactionRef: input.transactionRef,
-          screenshotUrl: input.screenshotUrl,
+          screenshotUrl: input.screenshotDataUrl,
           source: "website",
         });
         // Notify admin
@@ -344,26 +349,6 @@ export const appRouter = router({
           });
         } catch (e) { /* non-blocking */ }
         return { success: true, paymentId: payment.id };
-      }),
-
-    // Upload screenshot
-    uploadScreenshot: protectedProcedure
-      .input(z.object({
-        filename: z.string(),
-        contentType: z.string(),
-        dataBase64: z.string(),
-      }))
-      .mutation(async ({ ctx, input }) => {
-        if (input.dataBase64.length > 1024 * 1024) {
-          throw new TRPCError({
-            code: "PAYLOAD_TOO_LARGE",
-            message: "Screenshot must be under 1MB after compression. Please try a smaller image.",
-          });
-        }
-        const buffer = Buffer.from(input.dataBase64, "base64");
-        const key = `payment-screenshots/${ctx.user.id}-${Date.now()}-${input.filename}`;
-        const { url } = await storagePut(key, buffer, input.contentType);
-        return { url };
       }),
 
     myPayments: protectedProcedure.query(async ({ ctx }) => {
