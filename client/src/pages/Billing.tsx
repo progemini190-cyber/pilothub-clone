@@ -86,6 +86,11 @@ const PAYMENT_METHODS = [
 
 export default function Billing() {
   const { user } = useAuth();
+  const { data: sessionUser } = trpc.auth.me.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
+  });
   const [location, setLocation] = useLocation();
   const [selectedPlan, setSelectedPlan] = useState<PlanId | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
@@ -118,6 +123,25 @@ export default function Billing() {
   });
   const { data: myPaymentsData } = trpc.payments.myPayments.useQuery();
   const myPayments = myPaymentsData?.payments;
+
+  const currentUser = (sessionUser ?? user) as
+    | { plan?: string | null; subscriptionPlan?: string | null }
+    | null;
+
+  const formatPlanLabel = (plan: string | null | undefined) => {
+    const raw = (plan ?? "").trim();
+    if (!raw || raw.toLowerCase() === "no plan") return "Free Trial";
+    return raw
+      .replace(/[-_]+/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  const currentPlanLabel = formatPlanLabel(
+    currentUser?.plan ?? currentUser?.subscriptionPlan ?? null,
+  );
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -194,13 +218,13 @@ export default function Billing() {
         ) : (
           <>
             {/* Current plan info */}
-            {user && (
+            {currentUser && (
               <div className="rounded-2xl p-4 flex items-center gap-3" style={{ background: "oklch(15% 0.04 220)", border: "1px solid oklch(22% 0.04 220)" }}>
                 <img src={LOGO_URL} alt="" className="w-10 h-10 rounded-xl object-contain" />
                 <div>
                   <p className="text-xs mb-0.5" style={{ color: "oklch(50% 0.03 220)" }}>Current Plan</p>
-                  <p className="font-bold text-white text-sm capitalize" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-                    {(user as any).subscriptionPlan || "Free Trial"}
+                  <p className="font-bold text-white text-sm" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                    {currentPlanLabel}
                   </p>
                 </div>
               </div>
