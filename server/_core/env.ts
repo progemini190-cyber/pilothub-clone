@@ -1,3 +1,5 @@
+import { resolveOpenAiApiKey } from "./aiKeys";
+
 export const ENV = {
   cookieSecret: process.env.JWT_SECRET ?? "",
   /** @deprecated Prefer TURSO_DATABASE_URL; kept for compatibility */
@@ -6,7 +8,9 @@ export const ENV = {
   tursoAuthToken: process.env.TURSO_AUTH_TOKEN ?? "",
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
-  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  /** OpenAI / built-in forge key — prefers OPENAI_API_KEY, then BUILT_IN_FORGE_API_KEY */
+  forgeApiKey: resolveOpenAiApiKey(),
+  openaiApiKey: resolveOpenAiApiKey(),
 
   /** Google OAuth Web client ID */
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",

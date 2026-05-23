@@ -61,11 +61,74 @@ var init_telegramPlans = __esm({
   }
 });
 
+// shared/plans.ts
+function getPlanDisplayName(planKey) {
+  if (!planKey) return "No Plan";
+  const key = planKey.toLowerCase().trim();
+  return PLAN_DISPLAY_NAMES[key] ?? planKey;
+}
+function parsePlanKey(planKey) {
+  const p = (planKey ?? "").toLowerCase().trim();
+  if (!p || p === "free") return { advisor: null, tier: "free" };
+  if (p.includes("founder")) {
+    if (p.includes("starter")) return { advisor: "founderpilot", tier: "starter" };
+    return { advisor: "founderpilot", tier: "pro" };
+  }
+  if (p.includes("biz")) {
+    if (p.includes("starter")) return { advisor: "bizpilot", tier: "starter" };
+    return { advisor: "bizpilot", tier: "pro" };
+  }
+  return { advisor: null, tier: "free" };
+}
+function hasAnyActivePaidPlan(plan, status) {
+  const st = (status ?? "active").toLowerCase().trim();
+  if (st !== "active") return false;
+  return parsePlanKey(plan).tier !== "free";
+}
+function isProTierPlan(planKey) {
+  return parsePlanKey(planKey).tier === "pro";
+}
+var PLAN_DISPLAY_NAMES;
+var init_plans = __esm({
+  "shared/plans.ts"() {
+    "use strict";
+    PLAN_DISPLAY_NAMES = {
+      "": "No Plan",
+      free: "Free Trial",
+      bizpilot: "BizPilot Pro",
+      "bizpilot-starter": "BizPilot Starter",
+      "bizpilot-pro": "BizPilot Pro",
+      founderpilot: "FounderPilot Pro",
+      "founderpilot-starter": "FounderPilot Starter",
+      "founderpilot-pro": "FounderPilot Pro"
+    };
+  }
+});
+
+// server/_core/aiKeys.ts
+function resolveOpenAiApiKey() {
+  return process.env.OPENAI_API_KEY?.trim() || process.env.BUILT_IN_FORGE_API_KEY?.trim() || "";
+}
+function assertOpenAiApiKeyConfigured() {
+  const apiKey = resolveOpenAiApiKey();
+  if (!apiKey) {
+    console.error("CRITICAL: OPENAI_API_KEY is undefined at runtime!");
+    throw new Error("Server configuration error: Missing AI Key.");
+  }
+  return apiKey;
+}
+var init_aiKeys = __esm({
+  "server/_core/aiKeys.ts"() {
+    "use strict";
+  }
+});
+
 // server/_core/env.ts
 var ENV;
 var init_env = __esm({
   "server/_core/env.ts"() {
     "use strict";
+    init_aiKeys();
     ENV = {
       cookieSecret: process.env.JWT_SECRET ?? "",
       /** @deprecated Prefer TURSO_DATABASE_URL; kept for compatibility */
@@ -74,7 +137,9 @@ var init_env = __esm({
       tursoAuthToken: process.env.TURSO_AUTH_TOKEN ?? "",
       isProduction: process.env.NODE_ENV === "production",
       forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
-      forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+      /** OpenAI / built-in forge key — prefers OPENAI_API_KEY, then BUILT_IN_FORGE_API_KEY */
+      forgeApiKey: resolveOpenAiApiKey(),
+      openaiApiKey: resolveOpenAiApiKey(),
       /** Google OAuth Web client ID */
       googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
       googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
@@ -236,6 +301,8 @@ var init_schema = __esm({
       conversationId: integer("conversationId").notNull(),
       role: text("role", { length: 64 }).notNull(),
       content: text("content").notNull(),
+      /** Optional base64 / data-URL image attachment for multimodal chat */
+      imageData: text("imageData"),
       tokenCount: integer("tokenCount"),
       createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => /* @__PURE__ */ new Date())
     });
@@ -480,6 +547,7 @@ var init_schema_mysql = __esm({
       conversationId: int("conversationId").notNull(),
       role: varchar("role", { length: 64 }).notNull(),
       content: text2("content").notNull(),
+      imageData: text2("imageData"),
       tokenCount: int("tokenCount"),
       createdAt: timestamp("createdAt").notNull().defaultNow()
     });
@@ -666,10 +734,10 @@ function isBenignMigrationError2(err) {
   return msg.includes("duplicate column") || msg.includes("already exists") || msg.includes("duplicate key name");
 }
 async function runTurso2(statement) {
-  const { createClient: createClient3 } = await import("@libsql/client");
+  const { createClient: createClient4 } = await import("@libsql/client");
   const config = resolveTursoConfig();
   if (!config) return;
-  const client = createClient3({ url: config.url, authToken: config.authToken });
+  const client = createClient4({ url: config.url, authToken: config.authToken });
   try {
     await client.execute(statement);
   } catch (err) {
@@ -764,8 +832,73 @@ var init_ensureAuthSchema = __esm({
   }
 });
 
-// server/db/connection.ts
+// server/db/ensureChatSchema.ts
+var ensureChatSchema_exports = {};
+__export(ensureChatSchema_exports, {
+  ensureChatSchema: () => ensureChatSchema
+});
 import { createClient as createClient2 } from "@libsql/client";
+function isBenignMigrationError3(err) {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return msg.includes("duplicate column") || msg.includes("already exists") || msg.includes("duplicate key name");
+}
+async function runTurso3(statement) {
+  const config = resolveTursoConfig();
+  if (!config) return;
+  const client = createClient2({ url: config.url, authToken: config.authToken });
+  try {
+    await client.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError3(err)) throw err;
+  }
+}
+async function runMysql3(statement) {
+  const pool = getMysqlPool();
+  if (!pool) return;
+  try {
+    await pool.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError3(err)) throw err;
+  }
+}
+async function runDrizzle3(statement) {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    const d = db;
+    if (typeof d.run === "function") await d.run(statement);
+    else if (typeof d.execute === "function") await d.execute(statement);
+  } catch (err) {
+    if (!isBenignMigrationError3(err)) throw err;
+  }
+}
+async function runStatement3(statement) {
+  const provider = getDatabaseProvider();
+  if (provider === "turso") await runTurso3(statement);
+  else if (provider === "mysql") await runMysql3(statement);
+  else await runDrizzle3(statement);
+}
+async function ensureChatSchema() {
+  if (_ready2) return;
+  const provider = getDatabaseProvider();
+  if (provider === "mysql") {
+    await runStatement3("ALTER TABLE `messages` ADD COLUMN `imageData` text NULL");
+  } else {
+    await runStatement3("ALTER TABLE `messages` ADD COLUMN `imageData` text");
+  }
+  _ready2 = true;
+}
+var _ready2;
+var init_ensureChatSchema = __esm({
+  "server/db/ensureChatSchema.ts"() {
+    "use strict";
+    init_connection();
+    _ready2 = false;
+  }
+});
+
+// server/db/connection.ts
+import { createClient as createClient3 } from "@libsql/client";
 import { sql as sql3 } from "drizzle-orm";
 import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
 import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
@@ -888,7 +1021,7 @@ async function connectTurso(config) {
     });
     return null;
   }
-  const client = createClient2({
+  const client = createClient3({
     url: config.url,
     authToken: config.authToken
   });
@@ -938,6 +1071,10 @@ async function initializeDatabase() {
       await ensureAuthSchema2().catch(
         (err) => console.warn("[Database] Auth schema migration skipped:", err)
       );
+      const { ensureChatSchema: ensureChatSchema2 } = await Promise.resolve().then(() => (init_ensureChatSchema(), ensureChatSchema_exports));
+      await ensureChatSchema2().catch(
+        (err) => console.warn("[Database] Chat schema migration skipped:", err)
+      );
       return _db;
     }
   }
@@ -972,6 +1109,10 @@ async function initializeDatabase() {
           await ensureAuthSchema2().catch(
             (err) => console.warn("[Database] Auth schema migration skipped:", err)
           );
+          const { ensureChatSchema: ensureChatSchema2 } = await Promise.resolve().then(() => (init_ensureChatSchema(), ensureChatSchema_exports));
+          await ensureChatSchema2().catch(
+            (err) => console.warn("[Database] Chat schema migration skipped:", err)
+          );
           return _db;
         }
       }
@@ -999,6 +1140,10 @@ async function initializeDatabase() {
       await ensureAuthSchema2().catch(
         (err) => console.warn("[Database] Auth schema migration skipped:", err)
       );
+      const { ensureChatSchema: ensureChatSchema2 } = await Promise.resolve().then(() => (init_ensureChatSchema(), ensureChatSchema_exports));
+      await ensureChatSchema2().catch(
+        (err) => console.warn("[Database] Chat schema migration skipped:", err)
+      );
       return _db;
     }
   }
@@ -1022,6 +1167,10 @@ async function initializeDatabase() {
         const { ensureAuthSchema: ensureAuthSchema2 } = await Promise.resolve().then(() => (init_ensureAuthSchema(), ensureAuthSchema_exports));
         await ensureAuthSchema2().catch(
           (err) => console.warn("[Database] Auth schema migration skipped:", err)
+        );
+        const { ensureChatSchema: ensureChatSchema2 } = await Promise.resolve().then(() => (init_ensureChatSchema(), ensureChatSchema_exports));
+        await ensureChatSchema2().catch(
+          (err) => console.warn("[Database] Chat schema migration skipped:", err)
         );
         return _db;
       }
@@ -1070,7 +1219,7 @@ var init_connection = __esm({
 });
 
 // server/db.ts
-import { eq as eq2, and, desc, asc, sql as sql4, inArray, or } from "drizzle-orm";
+import { eq as eq2, and, desc, asc, sql as sql4, or } from "drizzle-orm";
 async function assertDatabase() {
   const database = await getDb();
   if (!database) {
@@ -1201,9 +1350,42 @@ async function linkUserToGoogleOpenId(userId, googleOpenId, fields) {
   if (fields.name !== void 0) updateSet.name = fields.name;
   await db.update(users3).set(updateSet).where(eq2(users3.id, userId));
 }
+function planAppliesToAdvisor(planKey, advisor) {
+  const parsed = parsePlanKey(planKey);
+  if (parsed.tier === "free") return false;
+  return parsed.advisor === advisor;
+}
+function isUnlimitedWebAdvisorUsage(advisor, row) {
+  const tierPlan = advisor === "bizpilot" ? row.planTypeBiz : row.planTypeFounder;
+  if (tierPlan === "pro") return true;
+  const limit = advisor === "bizpilot" ? row.bizMessageLimit ?? 5 : row.founderMessageLimit ?? 5;
+  if (limit >= WEB_CHAT_UNLIMITED_LIMIT) return true;
+  if (!planAppliesToAdvisor(row.plan, advisor)) return false;
+  return isProTierPlan(row.plan);
+}
+function webMessageLimitForAdvisor(advisor, row) {
+  if (isUnlimitedWebAdvisorUsage(advisor, row)) return WEB_CHAT_UNLIMITED_LIMIT;
+  const tierPlan = advisor === "bizpilot" ? row.planTypeBiz : row.planTypeFounder;
+  const storedLimit = advisor === "bizpilot" ? row.bizMessageLimit ?? 5 : row.founderMessageLimit ?? 5;
+  if (planAppliesToAdvisor(row.plan, advisor)) {
+    const tier = parsePlanKey(row.plan).tier;
+    if (tier === "starter") return Math.max(storedLimit, WEB_CHAT_STARTER_LIMIT);
+    if (tier === "pro") return WEB_CHAT_UNLIMITED_LIMIT;
+  }
+  if (tierPlan === "starter") return Math.max(storedLimit, WEB_CHAT_STARTER_LIMIT);
+  return storedLimit;
+}
 async function getMessageUsage(userId, advisor) {
   const db = await getDb();
-  if (!db) return { used: 0, limit: 5, planType: "free", hasUsedStarter: false };
+  if (!db) {
+    return {
+      used: 0,
+      limit: 5,
+      planType: "free",
+      hasUsedStarter: false,
+      hasPaidPlan: false
+    };
+  }
   const result = await db.select({
     bizMessagesUsed: users3.bizMessagesUsed,
     founderMessagesUsed: users3.founderMessagesUsed,
@@ -1212,23 +1394,40 @@ async function getMessageUsage(userId, advisor) {
     planTypeBiz: users3.planTypeBiz,
     planTypeFounder: users3.planTypeFounder,
     hasUsedBizStarter: users3.hasUsedBizStarter,
-    hasUsedFounderStarter: users3.hasUsedFounderStarter
+    hasUsedFounderStarter: users3.hasUsedFounderStarter,
+    plan: users3.plan,
+    status: users3.status
   }).from(users3).where(eq2(users3.id, userId)).limit(1);
   const row = result[0];
-  if (!row) return { used: 0, limit: 5, planType: "free", hasUsedStarter: false };
+  if (!row) {
+    return {
+      used: 0,
+      limit: 5,
+      planType: "free",
+      hasUsedStarter: false,
+      hasPaidPlan: false
+    };
+  }
+  const unlimited = isUnlimitedWebAdvisorUsage(advisor, row);
+  const limit = webMessageLimitForAdvisor(advisor, row);
+  const hasPaidPlan = hasAnyActivePaidPlan(row.plan, row.status);
   if (advisor === "bizpilot") {
+    const planType = row.planTypeBiz ?? "free";
     return {
       used: row.bizMessagesUsed ?? 0,
-      limit: row.bizMessageLimit ?? 5,
-      planType: row.planTypeBiz ?? "free",
-      hasUsedStarter: row.hasUsedBizStarter === "true"
+      limit,
+      planType: unlimited ? "pro" : planType,
+      hasUsedStarter: row.hasUsedBizStarter === "true",
+      hasPaidPlan: hasPaidPlan && (planAppliesToAdvisor(row.plan, "bizpilot") || planType !== "free")
     };
   } else {
+    const planType = row.planTypeFounder ?? "free";
     return {
       used: row.founderMessagesUsed ?? 0,
-      limit: row.founderMessageLimit ?? 5,
-      planType: row.planTypeFounder ?? "free",
-      hasUsedStarter: row.hasUsedFounderStarter === "true"
+      limit,
+      planType: unlimited ? "pro" : planType,
+      hasUsedStarter: row.hasUsedFounderStarter === "true",
+      hasPaidPlan: hasPaidPlan && (planAppliesToAdvisor(row.plan, "founderpilot") || planType !== "free")
     };
   }
 }
@@ -1236,6 +1435,7 @@ async function incrementMessageUsed(userId, advisor) {
   const db = await getDb();
   if (!db) return;
   const usage = await getMessageUsage(userId, advisor);
+  if (usage.limit >= WEB_CHAT_UNLIMITED_LIMIT) return;
   if (advisor === "bizpilot") {
     await db.update(users3).set({ bizMessagesUsed: usage.used + 1 }).where(eq2(users3.id, userId));
   } else {
@@ -1257,6 +1457,7 @@ async function activateTieredPlan(userId, advisor, planType) {
     if (planType === "starter") {
       updateData.bizMessageLimit = 20;
       updateData.hasUsedBizStarter = "true";
+      updateData.subscriptionStart = now;
     } else {
       updateData.bizMessageLimit = 999999;
       updateData.planExpiryDate = end;
@@ -1273,6 +1474,7 @@ async function activateTieredPlan(userId, advisor, planType) {
     if (planType === "starter") {
       updateData.founderMessageLimit = 20;
       updateData.hasUsedFounderStarter = "true";
+      updateData.subscriptionStart = now;
     } else {
       updateData.founderMessageLimit = 999999;
       updateData.planExpiryDate = end;
@@ -1325,9 +1527,42 @@ async function createMessage(input) {
     conversationId: input.conversationId,
     role: input.role,
     content: input.content,
+    imageData: input.imageData ?? null,
     tokenCount: input.tokenCount ?? null
   }).returning();
   return row;
+}
+async function listWebChatHistoryForAdvisor(userId, modelSlug) {
+  const convs = await listUserConversations(userId, modelSlug, 1);
+  if (convs.length === 0) {
+    return { conversationId: null, messages: [] };
+  }
+  const conv = convs[0];
+  const usage = await getMessageUsage(userId, modelSlug);
+  let rows = await listConversationMessages(conv.id);
+  if (usage.planType === "pro") {
+    const fullUser = await getUserById(userId);
+    const activation = fullUser?.subscriptionStart;
+    if (activation) {
+      const activationMs = activation instanceof Date ? activation.getTime() : Number(activation);
+      if (Number.isFinite(activationMs)) {
+        rows = rows.filter((m) => {
+          const created = m.createdAt instanceof Date ? m.createdAt.getTime() : Number(m.createdAt);
+          return Number.isFinite(created) && created >= activationMs;
+        });
+      }
+    }
+  } else if (usage.planType === "starter") {
+    rows = rows.slice(0, WEB_CHAT_STARTER_MEMORY_LIMIT);
+  }
+  return {
+    conversationId: conv.id,
+    messages: rows.map((m) => ({
+      role: m.role,
+      content: m.content,
+      imageData: m.imageData ?? null
+    }))
+  };
 }
 async function touchConversation(conversationId) {
   const db = await getDb();
@@ -1495,13 +1730,50 @@ async function createEmailPasswordUser(input) {
   });
   return { openId };
 }
-async function updateUserSubscription(userId, plan, status) {
+async function applyAdminUserPlan(userId, planKey) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   const now = /* @__PURE__ */ new Date();
   const end = new Date(now);
   end.setMonth(end.getMonth() + 1);
-  await db.update(users3).set({ plan, status, subscriptionStart: now, subscriptionEnd: end, updatedAt: now }).where(eq2(users3.id, userId));
+  const { advisor, tier } = parsePlanKey(planKey);
+  if (!planKey.trim() || tier === "free") {
+    await db.update(users3).set({
+      plan: "free",
+      status: "inactive",
+      updatedAt: now
+    }).where(eq2(users3.id, userId));
+    return;
+  }
+  const updateSet = {
+    plan: planKey,
+    status: "active",
+    subscriptionStart: now,
+    subscriptionEnd: end,
+    updatedAt: now
+  };
+  if (advisor === "bizpilot") {
+    updateSet.planTypeBiz = tier;
+    updateSet.bizMessagesUsed = 0;
+    updateSet.bizMessageLimit = tier === "pro" ? WEB_CHAT_UNLIMITED_LIMIT : WEB_CHAT_STARTER_LIMIT;
+    if (tier === "starter") updateSet.hasUsedBizStarter = "true";
+  } else if (advisor === "founderpilot") {
+    updateSet.planTypeFounder = tier;
+    updateSet.founderMessagesUsed = 0;
+    updateSet.founderMessageLimit = tier === "pro" ? WEB_CHAT_UNLIMITED_LIMIT : WEB_CHAT_STARTER_LIMIT;
+    if (tier === "starter") updateSet.hasUsedFounderStarter = "true";
+  }
+  await db.update(users3).set(updateSet).where(eq2(users3.id, userId));
+}
+async function updateUserSubscription(userId, plan, status) {
+  const isActive = status.toLowerCase().trim() === "active";
+  if (!isActive || !plan.trim() || plan === "free") {
+    const db = await getDb();
+    if (!db) throw new Error("Database not available");
+    await db.update(users3).set({ plan, status, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(users3.id, userId));
+    return;
+  }
+  await applyAdminUserPlan(userId, plan);
 }
 async function deleteUser(userId) {
   const db = await getDb();
@@ -1709,7 +1981,7 @@ function clipTelegramTurnContent(text3) {
 async function listRecentTelegramLlmTurnsForAdvisor(userId, advisor, maxMessages) {
   const db = await getDb();
   if (!db) return [];
-  const cap = Math.min(Math.max(1, maxMessages), MAX_TELEGRAM_LLM_TURNS);
+  const cap = Math.max(1, maxMessages);
   try {
     const rows = await db.select({
       role: telegramLlmTurns3.role,
@@ -1745,15 +2017,6 @@ async function appendTelegramLlmTurnPair(userId, advisor, userContent, assistant
         createdAt: now
       }
     ]);
-    const ids = await db.select({ id: telegramLlmTurns3.id }).from(telegramLlmTurns3).where(and(eq2(telegramLlmTurns3.userId, userId), eq2(telegramLlmTurns3.advisor, advisor))).orderBy(desc(telegramLlmTurns3.createdAt));
-    const toDrop = ids.slice(MAX_TELEGRAM_LLM_TURNS);
-    if (toDrop.length === 0) return;
-    await db.delete(telegramLlmTurns3).where(
-      inArray(
-        telegramLlmTurns3.id,
-        toDrop.map((r) => r.id)
-      )
-    );
   } catch (err) {
     console.error("[db] appendTelegramLlmTurnPair (telegram_llm_turns) failed:", err);
   }
@@ -1922,17 +2185,20 @@ async function decrementTelegramMessageLimit(userId, isBiz) {
     }).where(eq2(users3.id, userId));
   }
 }
-var MAX_TELEGRAM_LLM_TURNS, MAX_TELEGRAM_TURN_CHARS;
+var WEB_CHAT_UNLIMITED_LIMIT, WEB_CHAT_STARTER_LIMIT, WEB_CHAT_STARTER_MEMORY_LIMIT, MAX_TELEGRAM_TURN_CHARS;
 var init_db = __esm({
   "server/db.ts"() {
     "use strict";
     init_telegramPlans();
+    init_plans();
     init_telegramPlans();
     init_env();
     init_adminAccess();
     init_userStatus();
     init_connection();
-    MAX_TELEGRAM_LLM_TURNS = 40;
+    WEB_CHAT_UNLIMITED_LIMIT = 999999;
+    WEB_CHAT_STARTER_LIMIT = 20;
+    WEB_CHAT_STARTER_MEMORY_LIMIT = 20;
     MAX_TELEGRAM_TURN_CHARS = 12e3;
   }
 });
@@ -2532,7 +2798,7 @@ var init_oauth = __esm({
 
 // server/_core/llm.ts
 async function invokeLLM(params) {
-  assertApiKey();
+  const apiKey = assertApiKey();
   const {
     messages: messages4,
     tools,
@@ -2574,7 +2840,7 @@ async function invokeLLM(params) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`
+      authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify(payload)
   });
@@ -2590,6 +2856,7 @@ var ensureArray, normalizeContentPart, normalizeMessage, normalizeToolChoice, re
 var init_llm = __esm({
   "server/_core/llm.ts"() {
     "use strict";
+    init_aiKeys();
     init_env();
     ensureArray = (value) => Array.isArray(value) ? value : [value];
     normalizeContentPart = (part) => {
@@ -2662,11 +2929,7 @@ var init_llm = __esm({
       return toolChoice;
     };
     resolveApiUrl = () => ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0 ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions` : "https://forge.manus.im/v1/chat/completions";
-    assertApiKey = () => {
-      if (!ENV.forgeApiKey) {
-        throw new Error("OPENAI_API_KEY is not configured");
-      }
-    };
+    assertApiKey = () => assertOpenAiApiKeyConfigured();
     normalizeResponseFormat = ({
       responseFormat,
       response_format,
@@ -2699,14 +2962,61 @@ var init_llm = __esm({
   }
 });
 
+// shared/llmChat.ts
+function isVisionCapableGeminiModel(model) {
+  const m = model.toLowerCase();
+  return VISION_GEMINI_MODELS.some((v) => m.includes(v.replace("-latest", "")) || m === v);
+}
+function parseImagePayload(input) {
+  if (!input?.trim()) return null;
+  const trimmed = input.trim();
+  const dataUrlMatch = /^data:([^;]+);base64,(.+)$/i.exec(trimmed);
+  if (dataUrlMatch) {
+    return { mimeType: dataUrlMatch[1], base64: dataUrlMatch[2] };
+  }
+  return { mimeType: "image/jpeg", base64: trimmed };
+}
+var VISION_GEMINI_MODELS;
+var init_llmChat = __esm({
+  "shared/llmChat.ts"() {
+    "use strict";
+    VISION_GEMINI_MODELS = [
+      "gemini-1.5-flash-latest",
+      "gemini-1.5-pro-latest",
+      "gemini-1.5-flash",
+      "gemini-1.5-pro",
+      "gemini-2.0-flash",
+      "gemini-2.5-flash",
+      "gemini-2.5-pro-preview-05-06"
+    ];
+  }
+});
+
 // server/llmWithApiKey.ts
+function chatHasImages(msgs) {
+  return msgs.some((m) => m.role !== "system" && Boolean(m.imageBase64?.trim()));
+}
+function resolveGeminiModel(configured, hasImages) {
+  if (hasImages && !isVisionCapableGeminiModel(configured)) {
+    return DEFAULT_VISION_MODEL;
+  }
+  return configured;
+}
 async function invokeAdvisorLLM(advisorSlug, messages4) {
+  const envOpenAiKey = resolveOpenAiApiKey();
   const aiModel = await getAiModel(advisorSlug);
-  const modelString = aiModel?.modelString ?? "gemini-2.5-pro-preview-05-06";
+  const configuredModel = aiModel?.modelString ?? DEFAULT_VISION_MODEL;
+  const hasImages = chatHasImages(messages4);
+  const modelString = resolveGeminiModel(configuredModel, hasImages);
   const isGeminiModel = modelString.startsWith("gemini");
   const systemMsg = messages4.find((m) => m.role === "system");
   const systemPromptText = systemMsg?.content ?? "";
-  const chatMessages = messages4.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
+  const chatMessages = messages4.filter((m) => m.role !== "system").map((m) => ({
+    role: m.role,
+    content: m.content,
+    imageBase64: m.imageBase64,
+    imageMimeType: m.imageMimeType
+  }));
   if (isGeminiModel) {
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
@@ -2723,10 +3033,11 @@ async function invokeAdvisorLLM(advisorSlug, messages4) {
     }
   } else {
     const openaiKey = await getActiveApiKey("openai");
-    if (openaiKey?.keyValue) {
+    const openAiApiKey = openaiKey?.keyValue?.trim() || envOpenAiKey;
+    if (openAiApiKey) {
       try {
         return await invokeWithOpenAI({
-          apiKey: openaiKey.keyValue,
+          apiKey: openAiApiKey,
           model: modelString,
           systemPrompt: systemPromptText,
           chatMessages
@@ -2740,7 +3051,7 @@ async function invokeAdvisorLLM(advisorSlug, messages4) {
       try {
         return await invokeWithGemini({
           apiKey: geminiKey.keyValue,
-          model: "gemini-2.5-pro-preview-05-06",
+          model: resolveGeminiModel(DEFAULT_VISION_MODEL, hasImages),
           systemPrompt: systemPromptText,
           chatMessages
         });
@@ -2749,7 +3060,23 @@ async function invokeAdvisorLLM(advisorSlug, messages4) {
       }
     }
   }
-  const fallbackMessages = messages4.map((m) => ({ role: m.role, content: m.content }));
+  if (envOpenAiKey && !isGeminiModel) {
+    try {
+      return await invokeWithOpenAI({
+        apiKey: assertOpenAiApiKeyConfigured(),
+        model: modelString,
+        systemPrompt: systemPromptText,
+        chatMessages
+      });
+    } catch (err) {
+      console.warn("[LLM] Env OPENAI_API_KEY failed, falling back to built-in:", err);
+    }
+  }
+  const fallbackMessages = messages4.map((m) => ({
+    role: m.role,
+    content: m.content
+  }));
+  assertOpenAiApiKeyConfigured();
   const response = await invokeLLM({ messages: fallbackMessages });
   const content = response.choices[0]?.message?.content;
   return typeof content === "string" ? content : "Sorry, I could not generate a response.";
@@ -2760,7 +3087,22 @@ async function invokeWithOpenAI(params) {
     messages4.push({ role: "system", content: params.systemPrompt });
   }
   const sanitizedChat = sanitizeChatMessages(params.chatMessages);
-  messages4.push(...sanitizedChat);
+  for (const msg of sanitizedChat) {
+    const image = parseImagePayload(msg.imageBase64);
+    if (image && msg.role === "user") {
+      const parts = [];
+      if (msg.content.trim()) {
+        parts.push({ type: "text", text: msg.content });
+      }
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${image.mimeType};base64,${image.base64}` }
+      });
+      messages4.push({ role: "user", content: parts });
+    } else {
+      messages4.push({ role: msg.role, content: msg.content });
+    }
+  }
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -2782,11 +3124,30 @@ async function invokeWithOpenAI(params) {
   const content = data.choices[0]?.message?.content;
   return typeof content === "string" ? content : "No response";
 }
+function buildGeminiParts(msg) {
+  const parts = [];
+  if (msg.content.trim()) {
+    parts.push({ text: msg.content });
+  }
+  const image = parseImagePayload(msg.imageBase64);
+  if (image) {
+    parts.push({
+      inlineData: {
+        mimeType: image.mimeType,
+        data: image.base64
+      }
+    });
+  }
+  if (parts.length === 0) {
+    parts.push({ text: "(no text)" });
+  }
+  return parts;
+}
 async function invokeWithGemini(params) {
   const sanitizedChat = sanitizeChatMessages(params.chatMessages);
   const geminiContents = sanitizedChat.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }]
+    parts: buildGeminiParts(m)
   }));
   if (geminiContents.length === 0 || geminiContents[geminiContents.length - 1].role !== "user") {
     throw new Error("Gemini requires the last message to be from the user");
@@ -2834,20 +3195,95 @@ function sanitizeChatMessages(messages4) {
       last.content = `${last.content}
 
 ${msg.content}`;
+      if (msg.imageBase64 && !last.imageBase64) {
+        last.imageBase64 = msg.imageBase64;
+        last.imageMimeType = msg.imageMimeType;
+      }
     } else {
-      result.push({ role: msg.role, content: msg.content });
+      result.push({ ...msg });
     }
   }
   return result;
 }
-var TEMPERATURE, MAX_OUTPUT_TOKENS;
+var TEMPERATURE, MAX_OUTPUT_TOKENS, DEFAULT_VISION_MODEL;
 var init_llmWithApiKey = __esm({
   "server/llmWithApiKey.ts"() {
     "use strict";
+    init_aiKeys();
     init_db();
     init_llm();
+    init_llmChat();
     TEMPERATURE = 0.3;
     MAX_OUTPUT_TOKENS = 4096;
+    DEFAULT_VISION_MODEL = "gemini-1.5-flash-latest";
+  }
+});
+
+// shared/chatSafety.ts
+function buildAdvisorSafetySuffix(advisor) {
+  const purpose = ADVISOR_PURPOSE[advisor];
+  return `
+${GLOBAL_SAFETY_PROMPT_BLOCK}
+
+### Advisor-specific refusal templates (use verbatim meaning)
+
+Burmese refusal:
+${REFUSAL_TEMPLATE_MY(purpose.my, "[\u1021\u1011\u1000\u103A\u1016\u1031\u102C\u103A\u1015\u103C\u1011\u102C\u1038\u101E\u1031\u102C \u1000\u102C\u1000\u103D\u101A\u103A\u101B\u1019\u100A\u1037\u103A \u1001\u1031\u102B\u1004\u103A\u1038\u1005\u1009\u103A]")}
+
+English refusal:
+${REFUSAL_TEMPLATE_EN(purpose.en, "[protected topic listed above]")}
+`.trim();
+}
+function appendAdvisorSafetyPrompt(basePrompt, advisor) {
+  return `${basePrompt.trim()}
+
+${buildAdvisorSafetySuffix(advisor)}`;
+}
+var ADVISOR_PURPOSE, REFUSAL_TEMPLATE_MY, REFUSAL_TEMPLATE_EN, GLOBAL_SAFETY_PROMPT_BLOCK;
+var init_chatSafety = __esm({
+  "shared/chatSafety.ts"() {
+    "use strict";
+    ADVISOR_PURPOSE = {
+      bizpilot: {
+        en: "Myanmar business strategy, operations, and growth",
+        my: "\u1019\u103C\u1014\u103A\u1019\u102C\u1005\u102E\u1038\u1015\u103D\u102C\u1038\u101B\u1031\u1038 \u1017\u103B\u1030\u101F\u102C\u104A \u101C\u102F\u1015\u103A\u1004\u1014\u103A\u1038\u101C\u100A\u103A\u1015\u1010\u103A\u1019\u103E\u102F\u1014\u103E\u1004\u1037\u103A \u1000\u103C\u102E\u1038\u1011\u103D\u102C\u1038\u1019\u103E\u102F"
+      },
+      founderpilot: {
+        en: "startup leadership, fundraising, and founder strategy",
+        my: "\u1005\u1010\u102C\u1038\u1010\u1015\u103A\u1001\u1031\u102B\u1004\u103A\u1038\u1006\u1031\u102C\u1004\u103A\u104A \u101B\u1014\u103A\u1015\u102F\u1036\u1004\u103D\u1031\u101B\u103E\u102C\u1016\u103D\u1031\u1019\u103E\u102F\u1014\u103E\u1004\u1037\u103A \u1016\u1031\u102C\u1004\u103A\u1012\u102B \u1017\u103B\u1030\u101F\u102C"
+      }
+    };
+    REFUSAL_TEMPLATE_MY = (purposeMy, topicMy) => `\u1005\u102D\u1010\u103A\u1019\u1000\u1031\u102C\u1004\u103A\u1038\u1015\u102B\u1018\u1030\u1038\u104B \u1000\u103B\u103D\u1014\u103A\u1010\u1031\u102C\u103A\u101F\u102C ${purposeMy} \u1021\u1015\u1031\u102B\u103A\u1019\u103E\u102C\u1015\u1032 \u1021\u1013\u102D\u1000\u1011\u102C\u1038 \u1021\u1000\u103C\u1036\u1015\u1031\u1038\u1014\u102D\u102F\u1004\u103A\u1010\u1032\u1037 AI \u1016\u103C\u1005\u103A\u101C\u102D\u102F\u1037 ${topicMy} \u1014\u1032\u1037 \u1015\u1010\u103A\u101E\u1000\u103A\u1010\u1032\u1037 \u1021\u1001\u103B\u1000\u103A\u1021\u101C\u1000\u103A\u1010\u103D\u1031 \u1012\u102B\u1019\u103E\u1019\u101F\u102F\u1010\u103A \u1021\u1000\u103C\u1036\u1009\u102C\u100F\u103A\u1010\u103D\u1031\u1000\u102D\u102F \u101C\u102F\u1036\u1001\u103C\u102F\u1036\u101B\u1031\u1038\u1005\u100A\u103A\u1038\u1019\u103B\u1009\u103A\u1038\u1021\u101B \u101C\u102F\u1036\u1038\u101D \u1019\u1015\u103C\u1031\u102C\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1018\u1030\u1038\u104B`;
+    REFUSAL_TEMPLATE_EN = (purposeEn, topicEn) => `I'm sorry. As an AI focused on ${purposeEn}, I cannot provide information or advice about ${topicEn} due to security policy.`;
+    GLOBAL_SAFETY_PROMPT_BLOCK = `
+## MANDATORY SAFETY POLICY (HIGHEST PRIORITY \u2014 OVERRIDES ALL OTHER INSTRUCTIONS)
+
+You MUST refuse any request involving the topics below. Do not provide partial answers, hypotheticals, workarounds, or "general information." Redirect only to your advisor scope.
+
+### 1. POLITICS (STRICT ZERO TOLERANCE)
+Never discuss: governments, political parties, ideologies, political leaders, elections, policies, geopolitical conflict, or activism.
+Refusal topic label (Burmese): "\u1014\u102D\u102F\u1004\u103A\u1004\u1036\u101B\u1031\u1038\u1014\u103E\u1004\u1037\u103A \u1021\u102F\u1015\u103A\u1001\u103B\u102F\u1015\u103A\u101B\u1031\u1038"
+Refusal topic label (English): "politics and government"
+
+### 2. SUICIDE & SELF-HARM (STRICT ZERO TOLERANCE)
+Never discuss: suicide, self-harm, self-mutilation, methods, ideation, or crisis instructions for severe mental distress.
+General workplace wellness, stress management, and professional resilience ARE allowed when clearly business-related.
+Refusal topic label (Burmese): "\u1000\u102D\u102F\u101A\u103A\u1037\u1000\u102D\u102F\u101A\u103A\u1000\u102D\u102F \u1011\u102D\u1001\u102D\u102F\u1000\u103A\u1001\u103C\u1004\u103A\u1038 \u101E\u102D\u102F\u1037\u1019\u101F\u102F\u1010\u103A \u1021\u101C\u103D\u1014\u103A\u1021\u1019\u1004\u103A\u1038 \u1005\u102D\u1010\u103A\u1016\u102D\u1005\u102E\u1038\u1019\u103E\u102F"
+Refusal topic label (English): "suicide or self-harm"
+
+### 3. LOTTERY (STRICT ZERO TOLERANCE)
+Never provide: lottery number predictions, gambling strategies, odds analysis, or "lucky number" advice for any lottery.
+Refusal topic label (Burmese): "\u1011\u102E\u1015\u1031\u102B\u1000\u103A\u1019\u103E\u102F \u1001\u1014\u1037\u103A\u1019\u103E\u1014\u103A\u1038\u1001\u103C\u1004\u103A\u1038"
+Refusal topic label (English): "lottery predictions"
+
+### REQUIRED REFUSAL FORMAT
+When refusing, reply in the user's language (Burmese and/or English as appropriate) using this exact meaning:
+
+Burmese: [Use the advisor-specific template provided in the next section]
+English: [Use the advisor-specific English template provided in the next section]
+
+Do not preach, moralize, or cite policy numbers. Keep refusals brief and offer one on-scope alternative question.
+`.trim();
   }
 });
 
@@ -2855,13 +3291,16 @@ var init_llmWithApiKey = __esm({
 var telegramConfig_exports = {};
 __export(telegramConfig_exports, {
   TELEGRAM_BOT_USERNAME_PLACEHOLDER: () => TELEGRAM_BOT_USERNAME_PLACEHOLDER,
+  TELEGRAM_SUPPORT_BOT_USERNAME_DEFAULT: () => TELEGRAM_SUPPORT_BOT_USERNAME_DEFAULT,
   buildTelegramStartLink: () => buildTelegramStartLink,
+  buildTelegramSupportLink: () => buildTelegramSupportLink,
   isFounderTelegramPlan: () => isFounderTelegramPlan,
   isTelegramBotUsernameConfigured: () => isTelegramBotUsernameConfigured,
   normalizeTelegramBotUsername: () => normalizeTelegramBotUsername,
   resolveTelegramActivationBotUsername: () => resolveTelegramActivationBotUsername,
   resolveTelegramBizBotUsername: () => resolveTelegramBizBotUsername,
-  resolveTelegramFounderBotUsername: () => resolveTelegramFounderBotUsername
+  resolveTelegramFounderBotUsername: () => resolveTelegramFounderBotUsername,
+  resolveTelegramSupportBotUsername: () => resolveTelegramSupportBotUsername
 });
 function normalizeTelegramBotUsername(raw) {
   return (raw ?? "").trim().replace(/^@/, "");
@@ -2893,11 +3332,19 @@ function buildTelegramStartLink(token, botUsername) {
   const user = normalizeTelegramBotUsername(botUsername) || TELEGRAM_BOT_USERNAME_PLACEHOLDER;
   return `https://t.me/${user}?start=${token}`;
 }
-var TELEGRAM_BOT_USERNAME_PLACEHOLDER;
+function resolveTelegramSupportBotUsername(env) {
+  const username = normalizeTelegramBotUsername(env.VITE_TELEGRAM_SUPPORT_BOT_USERNAME) || normalizeTelegramBotUsername(env.NEXT_PUBLIC_TELEGRAM_SUPPORT_BOT_USERNAME) || normalizeTelegramBotUsername(env.TELEGRAM_SUPPORT_BOT_USERNAME) || "";
+  return username || TELEGRAM_SUPPORT_BOT_USERNAME_DEFAULT;
+}
+function buildTelegramSupportLink(env) {
+  return `https://t.me/${resolveTelegramSupportBotUsername(env)}`;
+}
+var TELEGRAM_BOT_USERNAME_PLACEHOLDER, TELEGRAM_SUPPORT_BOT_USERNAME_DEFAULT;
 var init_telegramConfig = __esm({
   "shared/telegramConfig.ts"() {
     "use strict";
     TELEGRAM_BOT_USERNAME_PLACEHOLDER = "YOUR_BOT_USERNAME";
+    TELEGRAM_SUPPORT_BOT_USERNAME_DEFAULT = "chatpilot_ai_bot";
   }
 });
 
@@ -3082,7 +3529,10 @@ async function handleChatMessage(chatId, userText, advisorSlug, advisorQuery, bo
   ].filter(Boolean).join("\n");
   const history = await listRecentTelegramLlmTurnsForAdvisor(user.id, advisorSlug, 40);
   const llmMessages = [
-    { role: "system", content: (systemPrompt || fallback) + profileCtx },
+    {
+      role: "system",
+      content: appendAdvisorSafetyPrompt((systemPrompt || fallback) + profileCtx, advisorSlug)
+    },
     ...history.map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: userText }
   ];
@@ -3305,6 +3755,7 @@ var init_telegram = __esm({
     init_db();
     init_ensureTelegramSchema();
     init_llmWithApiKey();
+    init_chatSafety();
     init_telegramConfig();
     init_telegramPlans();
     NO_ACCESS_MSG = "\u101C\u1030\u1000\u103C\u102E\u1038\u1019\u1004\u103A\u1038\u104F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1001\u103D\u1004\u1037\u103A \u1000\u102F\u1014\u103A\u1006\u102F\u1036\u1038\u101E\u103D\u102C\u1038\u1015\u102B\u1015\u103C\u102E\u104B \u1011\u1015\u103A\u1019\u1036\u101D\u101A\u103A\u101A\u1030\u101B\u1014\u103A ChatPilot \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
@@ -3647,10 +4098,98 @@ var systemRouter = router({
 
 // server/routers.ts
 init_db();
-init_llmWithApiKey();
-init_telegram();
-import { z as z2 } from "zod";
+import { z as z3 } from "zod";
 import { TRPCError as TRPCError3 } from "@trpc/server";
+
+// server/advisorChat.ts
+init_db();
+init_llmWithApiKey();
+init_chatSafety();
+init_llmChat();
+import { z as z2 } from "zod";
+var advisorChatInputSchema = z2.object({
+  message: z2.string().max(1e4),
+  conversationId: z2.number().optional(),
+  imageBase64: z2.string().max(6e6).optional()
+}).refine((d) => d.message.trim().length > 0 || Boolean(d.imageBase64?.trim()), {
+  message: "Message or image is required"
+});
+var FALLBACK_PROMPTS = {
+  bizpilot: "You are BizPilot, an expert business advisor for Myanmar businesses.",
+  founderpilot: "You are FounderPilot, a strategic advisor for founders and CEOs."
+};
+function toDataUrl(imageBase64) {
+  if (!imageBase64?.trim()) return null;
+  const parsed = parseImagePayload(imageBase64);
+  if (!parsed) return null;
+  return `data:${parsed.mimeType};base64,${parsed.base64}`;
+}
+async function runAdvisorChatMutation(advisor, user, input) {
+  const usage = await getMessageUsage(user.id, advisor);
+  const text3 = input.message.trim();
+  const imageDataUrl = toDataUrl(input.imageBase64);
+  const userContent = text3 || (imageDataUrl ? "[Image attached]" : "");
+  const conv = await getOrCreateConversation({
+    userId: user.id,
+    modelSlug: advisor,
+    conversationId: input.conversationId
+  });
+  await createMessage({
+    conversationId: conv.id,
+    role: "user",
+    content: userContent,
+    imageData: imageDataUrl
+  });
+  const history = await listConversationMessages(conv.id);
+  const recentHistory = history.slice(-20);
+  const systemPrompt = await getActiveSystemPrompt(advisor);
+  const fullUser = await getUserById(user.id);
+  const userProfileLines = [
+    `
+
+[User Profile]`,
+    `- Name: ${fullUser?.name ?? user.name ?? "Unknown"}`,
+    fullUser?.businessName ? `- Business Name: ${fullUser.businessName}` : null,
+    fullUser?.businessType ? `- Business Type: ${fullUser.businessType}` : null,
+    fullUser?.useCase ? `- How they use PilotHub: ${fullUser.useCase}` : null,
+    `- Plan: ${usage.planType}`
+  ].filter(Boolean);
+  const userProfileCtx = userProfileLines.join("\n");
+  const olderHistory = history.slice(0, Math.max(0, history.length - 21));
+  const memoryNote = olderHistory.length > 0 ? `
+
+[Conversation Memory: ${history.length} total messages. Earlier: ${olderHistory.slice(-5).map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content.slice(0, 120)}`).join(" | ")}]` : "";
+  const baseSystem = (systemPrompt || FALLBACK_PROMPTS[advisor]) + userProfileCtx + memoryNote;
+  const safeSystem = appendAdvisorSafetyPrompt(baseSystem, advisor);
+  const llmMessages = [
+    { role: "system", content: safeSystem },
+    ...recentHistory.slice(0, -1).map((m) => {
+      const row = m;
+      return {
+        role: m.role,
+        content: m.content,
+        imageBase64: row.imageData ?? void 0
+      };
+    }),
+    {
+      role: "user",
+      content: userContent,
+      imageBase64: imageDataUrl ?? void 0
+    }
+  ];
+  const assistantMessage = await invokeAdvisorLLM(advisor, llmMessages);
+  await createMessage({ conversationId: conv.id, role: "assistant", content: assistantMessage });
+  await touchConversation(conv.id);
+  if (history.length <= 1) {
+    await updateConversationTitle(conv.id, (text3 || "Image message").slice(0, 80));
+  }
+  await incrementMessageUsed(user.id, advisor);
+  const newUsage = await getMessageUsage(user.id, advisor);
+  return { conversationId: conv.id, message: assistantMessage, usage: newUsage };
+}
+
+// server/routers.ts
+init_telegram();
 
 // server/quickCreateUser.ts
 init_db();
@@ -3714,11 +4253,9 @@ function parsePlanType(value) {
   return "bizpilot";
 }
 
-// server/routers.ts
-init_storage();
-
 // server/emailHelper.ts
 import nodemailer from "nodemailer";
+var PILOTHUB_ADMIN_NOTIFICATION_EMAIL = "chatpilot.mm@gmail.com";
 function htmlToPlainText(html) {
   return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<\/div>/gi, "\n").replace(/<\/tr>/gi, "\n").replace(/<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -3875,6 +4412,75 @@ free plan \u1016\u103C\u1004\u1037\u103A \u1005\u1010\u1004\u103A\u1005\u1019\u1
 Powered by ChatPilot`
   });
 }
+async function sendNewPaymentSubmittedEmail(payment) {
+  const rows = [
+    ["Name", payment.userName],
+    ["Email", payment.userEmail],
+    ["Plan", payment.plan],
+    ["Amount", `${payment.amount.toLocaleString()} MMK`],
+    ["Payment Method", payment.paymentMethod],
+    ["Transaction Ref", payment.transactionRef ?? "\u2014"]
+  ];
+  const tableRows = rows.map(
+    ([label, value]) => `<tr>
+          <td style="padding: 10px 14px; color: #64748b; font-size: 13px; vertical-align: top; width: 140px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(label)}</td>
+          <td style="padding: 10px 14px; color: #1e293b; font-size: 14px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(value)}</td>
+        </tr>`
+  ).join("");
+  const bodyHtml = `
+    <h2 style="color: #0f172a; font-size: 20px; margin: 0 0 20px; font-weight: 600;">New payment submitted</h2>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+      ${tableRows}
+    </table>
+    <p style="color: #64748b; font-size: 13px; margin: 24px 0 0;">
+      Review in the <a href="https://www.pilothub.vip/admin/payments" style="color: #0d9488; text-decoration: none;">Admin Payments</a> panel.
+    </p>
+  `;
+  const wrappedHtml = wrapPilotHubEmailHtml(bodyHtml);
+  const plain = rows.map(([k, v]) => `${k}: ${v}`).join("\n");
+  return sendEmail({
+    to: PILOTHUB_ADMIN_NOTIFICATION_EMAIL,
+    subject: "New Payment Submitted!",
+    html: wrappedHtml,
+    text: `New Payment Submitted!
+
+${plain}
+
+Review: https://www.pilothub.vip/admin/payments`
+  });
+}
+async function sendAccountUpgradedEmail({
+  to,
+  name,
+  planName
+}) {
+  const bodyHtml = `
+      <h2 style="color: #0f172a; font-size: 22px; margin: 0 0 16px; font-weight: 600;">Account Upgraded</h2>
+      <p style="color: #475569; line-height: 1.8; margin: 0 0 16px;">
+        \u1019\u1004\u103A\u1039\u1002\u101C\u102C\u1015\u102B ${escapeHtml(name)}\u104B \u101E\u1004\u1037\u103A\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u1000\u102D\u102F <strong style="color: #0d9488;">${escapeHtml(planName)}</strong> \u101E\u102D\u102F\u1037 \u1021\u1031\u102C\u1004\u103A\u1019\u103C\u1004\u103A\u1005\u103D\u102C \u1021\u1006\u1004\u1037\u103A\u1019\u103C\u103E\u1004\u1037\u103A\u1010\u1004\u103A\u1015\u1031\u1038\u101C\u102D\u102F\u1000\u103A\u1015\u102B\u1015\u103C\u102E\u104B
+      </p>
+      <p style="color: #64748b; font-size: 14px; margin: 0;">
+        \u101A\u1001\u102F PilotHub \u101E\u102D\u102F\u1037 \u101D\u1004\u103A\u101B\u1031\u102C\u1000\u103A\u1015\u103C\u102E\u1038 AI advisors \u1019\u103B\u102C\u1038\u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B
+      </p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin: 24px 0;">
+        <tr>
+          <td align="center">
+            <a href="https://www.pilothub.vip/app" style="display: inline-block; padding: 14px 28px; background-color: #0d9488; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px; border-radius: 6px;">Dashboard \u101E\u102D\u102F\u1037 \u101E\u103D\u102C\u1038\u1015\u102B \u2192</a>
+          </td>
+        </tr>
+      </table>
+  `;
+  const wrappedHtml = wrapPilotHubEmailHtml(bodyHtml);
+  const plain = `\u1019\u1004\u103A\u1039\u1002\u101C\u102C\u1015\u102B\u104B \u101E\u1004\u1037\u103A\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u1000\u102D\u102F ${planName} \u101E\u102D\u102F\u1037 \u1021\u1031\u102C\u1004\u103A\u1019\u103C\u1004\u103A\u1005\u103D\u102C \u1021\u1006\u1004\u1037\u103A\u1019\u103C\u103E\u1004\u1037\u103A\u1010\u1004\u103A\u1015\u1031\u1038\u101C\u102D\u102F\u1000\u103A\u1015\u102B\u1015\u103C\u102E\u104B
+
+https://www.pilothub.vip/app`;
+  return sendEmail({
+    to,
+    subject: "PilotHub - Account Upgraded!",
+    html: wrappedHtml,
+    text: plain
+  });
+}
 async function sendPaymentConfirmationEmail({
   to,
   name,
@@ -3900,6 +4506,7 @@ Powered by ChatPilot`
 }
 
 // server/routers.ts
+init_plans();
 init_adminAccess();
 
 // server/_core/passwordAuth.ts
@@ -3976,10 +4583,10 @@ var appRouter = router({
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     register: publicProcedure.input(
-      z2.object({
-        email: z2.string().email(),
-        password: z2.string().min(8, "Password must be at least 8 characters"),
-        name: z2.string().min(1).optional()
+      z3.object({
+        email: z3.string().email(),
+        password: z3.string().min(8, "Password must be at least 8 characters"),
+        name: z3.string().min(1).optional()
       })
     ).mutation(async ({ ctx, input }) => {
       await assertDatabase();
@@ -4005,9 +4612,9 @@ var appRouter = router({
       };
     }),
     login: publicProcedure.input(
-      z2.object({
-        email: z2.string().email(),
-        password: z2.string().min(1)
+      z3.object({
+        email: z3.string().email(),
+        password: z3.string().min(1)
       })
     ).mutation(async ({ ctx, input }) => {
       await assertDatabase();
@@ -4047,9 +4654,9 @@ var appRouter = router({
       };
     }),
     completeOnboarding: protectedProcedure.input(
-      z2.object({
-        name: z2.string().min(1, "Name is required"),
-        useCase: z2.string().min(1, "Purpose is required")
+      z3.object({
+        name: z3.string().min(1, "Name is required"),
+        useCase: z3.string().min(1, "Purpose is required")
       })
     ).mutation(async ({ ctx, input }) => {
       await completeUserOnboarding(ctx.user.id, {
@@ -4058,10 +4665,10 @@ var appRouter = router({
       });
       return { success: true, redirectTo: "/app" };
     }),
-    updateProfile: protectedProcedure.input(z2.object({
-      name: z2.string().min(1).optional(),
-      phone: z2.string().optional(),
-      businessName: z2.string().optional()
+    updateProfile: protectedProcedure.input(z3.object({
+      name: z3.string().min(1).optional(),
+      phone: z3.string().optional(),
+      businessName: z3.string().optional()
     })).mutation(async ({ ctx, input }) => {
       await updateUserProfile(ctx.user.id, {
         name: input.name,
@@ -4079,21 +4686,21 @@ var appRouter = router({
   // ── AI chat and conversation routers ──
   ai: router({
     conversations: router({
-      list: approvedProcedure.input(z2.object({ modelSlug: z2.enum(["bizpilot", "founderpilot"]) })).query(async ({ ctx, input }) => {
+      list: approvedProcedure.input(z3.object({ modelSlug: z3.enum(["bizpilot", "founderpilot"]) })).query(async ({ ctx, input }) => {
         const convs = await listUserConversations(ctx.user.id, input.modelSlug);
         return { conversations: convs };
       }),
-      get: approvedProcedure.input(z2.object({ conversationId: z2.number() })).query(async ({ ctx, input }) => {
+      get: approvedProcedure.input(z3.object({ conversationId: z3.number() })).query(async ({ ctx, input }) => {
         const conv = await getConversationById(ctx.user.id, input.conversationId);
         if (!conv) throw new TRPCError3({ code: "NOT_FOUND" });
         const msgs = await listConversationMessages(input.conversationId);
         return { conversation: conv, messages: msgs };
       }),
-      create: approvedProcedure.input(z2.object({ modelSlug: z2.enum(["bizpilot", "founderpilot"]), title: z2.string().optional() })).mutation(async ({ ctx, input }) => {
+      create: approvedProcedure.input(z3.object({ modelSlug: z3.enum(["bizpilot", "founderpilot"]), title: z3.string().optional() })).mutation(async ({ ctx, input }) => {
         const conv = await getOrCreateConversation({ userId: ctx.user.id, modelSlug: input.modelSlug, title: input.title });
         return { conversation: conv };
       }),
-      delete: approvedProcedure.input(z2.object({ conversationId: z2.number() })).mutation(async ({ ctx, input }) => {
+      delete: approvedProcedure.input(z3.object({ conversationId: z3.number() })).mutation(async ({ ctx, input }) => {
         const conv = await getConversationById(ctx.user.id, input.conversationId);
         if (!conv) throw new TRPCError3({ code: "NOT_FOUND" });
         await deleteConversation(input.conversationId, ctx.user.id);
@@ -4109,7 +4716,11 @@ var appRouter = router({
       const founder = await getMessageUsage(ctx.user.id, "founderpilot");
       return { biz, founder };
     }),
-    bizpilot: approvedProcedure.input(z2.object({ message: z2.string().min(1).max(1e4), conversationId: z2.number().optional() })).mutation(async ({ ctx, input }) => {
+    /** Latest conversation + plan-scoped messages for web chat restore on mount. */
+    getHistory: approvedProcedure.input(z3.object({ modelSlug: z3.enum(["bizpilot", "founderpilot"]) })).query(async ({ ctx, input }) => {
+      return await listWebChatHistoryForAdvisor(ctx.user.id, input.modelSlug);
+    }),
+    bizpilot: approvedProcedure.input(advisorChatInputSchema).mutation(async ({ ctx, input }) => {
       const user = ctx.user;
       const usage = await getMessageUsage(user.id, "bizpilot");
       if (usage.used >= usage.limit) {
@@ -4125,41 +4736,9 @@ var appRouter = router({
           })
         });
       }
-      const conv = await getOrCreateConversation({ userId: user.id, modelSlug: "bizpilot", conversationId: input.conversationId });
-      await createMessage({ conversationId: conv.id, role: "user", content: input.message });
-      const history = await listConversationMessages(conv.id);
-      const recentHistory = history.slice(-20);
-      const systemPrompt = await getActiveSystemPrompt("bizpilot");
-      const fullUser = await getUserById(user.id);
-      const userProfileLines = [
-        `
-
-[User Profile]`,
-        `- Name: ${fullUser?.name ?? user.name ?? "Unknown"}`,
-        fullUser?.businessName ? `- Business Name: ${fullUser.businessName}` : null,
-        fullUser?.businessType ? `- Business Type: ${fullUser.businessType}` : null,
-        fullUser?.useCase ? `- How they use PilotHub: ${fullUser.useCase}` : null,
-        `- Plan: ${usage.planType}`
-      ].filter(Boolean);
-      const userProfileCtx = userProfileLines.join("\n");
-      const olderHistory = history.slice(0, Math.max(0, history.length - 21));
-      const memoryNote = olderHistory.length > 0 ? `
-
-[Conversation Memory: ${history.length} total messages. Earlier: ${olderHistory.slice(-5).map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content.slice(0, 120)}`).join(" | ")}]` : "";
-      const llmMessages = [
-        { role: "system", content: (systemPrompt || "You are BizPilot, an expert business advisor for Myanmar businesses.") + userProfileCtx + memoryNote },
-        ...recentHistory.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
-        { role: "user", content: input.message }
-      ];
-      const assistantMessage = await invokeAdvisorLLM("bizpilot", llmMessages);
-      await createMessage({ conversationId: conv.id, role: "assistant", content: assistantMessage });
-      await touchConversation(conv.id);
-      if (history.length <= 1) await updateConversationTitle(conv.id, input.message.slice(0, 80));
-      await incrementMessageUsed(user.id, "bizpilot");
-      const newUsage = await getMessageUsage(user.id, "bizpilot");
-      return { conversationId: conv.id, message: assistantMessage, usage: newUsage };
+      return await runAdvisorChatMutation("bizpilot", user, input);
     }),
-    founderpilot: approvedProcedure.input(z2.object({ message: z2.string().min(1).max(1e4), conversationId: z2.number().optional() })).mutation(async ({ ctx, input }) => {
+    founderpilot: approvedProcedure.input(advisorChatInputSchema).mutation(async ({ ctx, input }) => {
       const user = ctx.user;
       const usage = await getMessageUsage(user.id, "founderpilot");
       if (usage.used >= usage.limit) {
@@ -4175,39 +4754,7 @@ var appRouter = router({
           })
         });
       }
-      const conv = await getOrCreateConversation({ userId: user.id, modelSlug: "founderpilot", conversationId: input.conversationId });
-      await createMessage({ conversationId: conv.id, role: "user", content: input.message });
-      const history = await listConversationMessages(conv.id);
-      const recentHistory = history.slice(-20);
-      const systemPrompt = await getActiveSystemPrompt("founderpilot");
-      const fullUser = await getUserById(user.id);
-      const userProfileLines = [
-        `
-
-[User Profile]`,
-        `- Name: ${fullUser?.name ?? user.name ?? "Unknown"}`,
-        fullUser?.businessName ? `- Business Name: ${fullUser.businessName}` : null,
-        fullUser?.businessType ? `- Business Type: ${fullUser.businessType}` : null,
-        fullUser?.useCase ? `- How they use PilotHub: ${fullUser.useCase}` : null,
-        `- Plan: ${usage.planType}`
-      ].filter(Boolean);
-      const userProfileCtx = userProfileLines.join("\n");
-      const olderHistory = history.slice(0, Math.max(0, history.length - 21));
-      const memoryNote = olderHistory.length > 0 ? `
-
-[Conversation Memory: ${history.length} total messages. Earlier: ${olderHistory.slice(-5).map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content.slice(0, 120)}`).join(" | ")}]` : "";
-      const llmMessages = [
-        { role: "system", content: (systemPrompt || "You are FounderPilot, a strategic advisor for founders and CEOs.") + userProfileCtx + memoryNote },
-        ...recentHistory.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
-        { role: "user", content: input.message }
-      ];
-      const assistantMessage = await invokeAdvisorLLM("founderpilot", llmMessages);
-      await createMessage({ conversationId: conv.id, role: "assistant", content: assistantMessage });
-      await touchConversation(conv.id);
-      if (history.length <= 1) await updateConversationTitle(conv.id, input.message.slice(0, 80));
-      await incrementMessageUsed(user.id, "founderpilot");
-      const newUsage = await getMessageUsage(user.id, "founderpilot");
-      return { conversationId: conv.id, message: assistantMessage, usage: newUsage };
+      return await runAdvisorChatMutation("founderpilot", user, input);
     })
   }),
   // ── Payment submission ──
@@ -4235,11 +4782,11 @@ var appRouter = router({
         ayapay: { phone: ayapayPhone, name: ayapayName, qrUrl: ayapayQr }
       };
     }),
-    submit: protectedProcedure.input(z2.object({
-      plan: z2.enum(["bizpilot", "founderpilot", "bizpilot-starter", "bizpilot-pro", "founderpilot-starter", "founderpilot-pro"]),
-      paymentMethod: z2.string(),
-      transactionRef: z2.string().optional(),
-      screenshotDataUrl: z2.string().optional().refine(
+    submit: protectedProcedure.input(z3.object({
+      plan: z3.enum(["bizpilot", "founderpilot", "bizpilot-starter", "bizpilot-pro", "founderpilot-starter", "founderpilot-pro"]),
+      paymentMethod: z3.string(),
+      transactionRef: z3.string().optional(),
+      screenshotDataUrl: z3.string().optional().refine(
         (value) => value === void 0 || value.startsWith("data:image/"),
         "Screenshot must be a data:image/... URL"
       )
@@ -4273,6 +4820,17 @@ Ref: ${input.transactionRef ?? "N/A"}`
         });
       } catch (e) {
       }
+      try {
+        await sendNewPaymentSubmittedEmail({
+          userName: ctx.user.name ?? "Unknown",
+          userEmail: ctx.user.email ?? "",
+          plan: input.plan,
+          amount: amounts[input.plan] ?? 0,
+          paymentMethod: input.paymentMethod,
+          transactionRef: input.transactionRef
+        });
+      } catch (e) {
+      }
       return { success: true, paymentId: payment.id };
     }),
     myPayments: protectedProcedure.query(async ({ ctx }) => {
@@ -4282,7 +4840,7 @@ Ref: ${input.transactionRef ?? "N/A"}`
   }),
   // ── Admin router ──
   admin: router({
-    login: publicProcedure.input(z2.object({ username: z2.string(), password: z2.string() })).mutation(async ({ ctx, input }) => {
+    login: publicProcedure.input(z3.object({ username: z3.string(), password: z3.string() })).mutation(async ({ ctx, input }) => {
       const adminUser = process.env.ADMIN_USERNAME || "admin";
       const adminPass = process.env.ADMIN_PASSWORD || "pilothub2026";
       if (input.username !== adminUser || input.password !== adminPass) {
@@ -4309,13 +4867,13 @@ Ref: ${input.transactionRef ?? "N/A"}`
         return await listSystemSettings();
       }),
       set: publicProcedure.input(
-        z2.union([
-          z2.object({ key: z2.string(), value: z2.string() }),
-          z2.object({
-            method: z2.enum(["kbzpay", "wavepay", "ayapay"]),
-            phone: z2.string(),
-            name: z2.string(),
-            qrDataUrl: z2.string().optional().refine(
+        z3.union([
+          z3.object({ key: z3.string(), value: z3.string() }),
+          z3.object({
+            method: z3.enum(["kbzpay", "wavepay", "ayapay"]),
+            phone: z3.string(),
+            name: z3.string(),
+            qrDataUrl: z3.string().optional().refine(
               (s) => s === void 0 || s.startsWith("data:image/"),
               "QR must be a data:image/... URL"
             )
@@ -4342,7 +4900,7 @@ Ref: ${input.transactionRef ?? "N/A"}`
         const apps = await listAllApplications();
         return { applications: apps };
       }),
-      approve: publicProcedure.input(z2.object({ applicationId: z2.number(), notes: z2.string().optional() })).mutation(async ({ ctx, input }) => {
+      approve: publicProcedure.input(z3.object({ applicationId: z3.number(), notes: z3.string().optional() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         const app2 = await getApplicationById(input.applicationId);
         if (!app2) throw new TRPCError3({ code: "NOT_FOUND" });
@@ -4375,7 +4933,7 @@ Ref: ${input.transactionRef ?? "N/A"}`
         }
         return { success: true, userId: user.id, openId };
       }),
-      reject: publicProcedure.input(z2.object({ applicationId: z2.number(), notes: z2.string().optional() })).mutation(async ({ ctx, input }) => {
+      reject: publicProcedure.input(z3.object({ applicationId: z3.number(), notes: z3.string().optional() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await updateApplicationStatus(input.applicationId, "rejected", void 0, input.notes);
         return { success: true };
@@ -4388,17 +4946,47 @@ Ref: ${input.transactionRef ?? "N/A"}`
         const users4 = await listAllUsers();
         return { users: users4 };
       }),
-      updateRole: publicProcedure.input(z2.object({ userId: z2.number(), role: z2.enum(["user", "admin"]) })).mutation(async ({ ctx, input }) => {
+      updateRole: publicProcedure.input(z3.object({ userId: z3.number(), role: z3.enum(["user", "admin"]) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await updateUserRole(input.userId, input.role);
         return { success: true };
       }),
-      updateSubscription: publicProcedure.input(z2.object({ userId: z2.number(), plan: z2.string(), status: z2.string() })).mutation(async ({ ctx, input }) => {
+      updateSubscription: publicProcedure.input(z3.object({ userId: z3.number(), plan: z3.string(), status: z3.string() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await updateUserSubscription(input.userId, input.plan, input.status);
         return { success: true };
       }),
-      generate: publicProcedure.input(z2.object({ name: z2.string().min(1), email: z2.string().email(), plan: z2.enum(["bizpilot", "founderpilot"]).optional(), businessName: z2.string().optional() })).mutation(async ({ ctx, input }) => {
+      updateUserPlan: publicProcedure.input(
+        z3.object({
+          userId: z3.number(),
+          plan: z3.enum([
+            "",
+            "bizpilot-starter",
+            "bizpilot-pro",
+            "founderpilot-starter",
+            "founderpilot-pro"
+          ])
+        })
+      ).mutation(async ({ ctx, input }) => {
+        await requireAdmin(ctx);
+        const user = await getUserById(input.userId);
+        if (!user) {
+          throw new TRPCError3({ code: "NOT_FOUND", message: "User not found" });
+        }
+        await applyAdminUserPlan(input.userId, input.plan);
+        if (input.plan && user.email) {
+          try {
+            await sendAccountUpgradedEmail({
+              to: user.email,
+              name: user.name ?? "User",
+              planName: getPlanDisplayName(input.plan)
+            });
+          } catch {
+          }
+        }
+        return { success: true, plan: input.plan || null };
+      }),
+      generate: publicProcedure.input(z3.object({ name: z3.string().min(1), email: z3.string().email(), plan: z3.enum(["bizpilot", "founderpilot"]).optional(), businessName: z3.string().optional() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         const { nanoid: nanoid4 } = await import("nanoid");
         const openId = `ext_${nanoid4(16)}`;
@@ -4410,12 +4998,12 @@ Ref: ${input.transactionRef ?? "N/A"}`
         if (input.plan) await updateUserSubscription(user.id, input.plan, "active");
         return { success: true, userId: user.id, openId, name: input.name, email: input.email, plan: input.plan || null, generatedPassword };
       }),
-      delete: publicProcedure.input(z2.object({ userId: z2.number() })).mutation(async ({ ctx, input }) => {
+      delete: publicProcedure.input(z3.object({ userId: z3.number() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await deleteUser(input.userId);
         return { success: true };
       }),
-      generateTelegramToken: publicProcedure.input(z2.object({ userId: z2.number() })).mutation(async ({ ctx, input }) => {
+      generateTelegramToken: publicProcedure.input(z3.object({ userId: z3.number() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         try {
           return await generateTelegramActivationToken(input.userId);
@@ -4432,7 +5020,7 @@ Ref: ${input.transactionRef ?? "N/A"}`
         const payments4 = await listAllPayments();
         return { payments: payments4 };
       }),
-      updateStatus: publicProcedure.input(z2.object({ paymentId: z2.number(), status: z2.enum(["pending", "confirmed", "rejected"]) })).mutation(async ({ ctx, input }) => {
+      updateStatus: publicProcedure.input(z3.object({ paymentId: z3.number(), status: z3.enum(["pending", "confirmed", "rejected"]) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await updatePaymentStatus(input.paymentId, input.status);
         if (input.status === "confirmed") {
@@ -4468,14 +5056,14 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         }
         return { success: true };
       }),
-      update: publicProcedure.input(z2.object({
-        paymentId: z2.number(),
-        plan: z2.string().optional(),
-        amount: z2.number().optional(),
-        status: z2.enum(["pending", "confirmed", "rejected"]).optional(),
-        paymentMethod: z2.string().optional(),
-        transactionRef: z2.string().optional(),
-        notes: z2.string().optional()
+      update: publicProcedure.input(z3.object({
+        paymentId: z3.number(),
+        plan: z3.string().optional(),
+        amount: z3.number().optional(),
+        status: z3.enum(["pending", "confirmed", "rejected"]).optional(),
+        paymentMethod: z3.string().optional(),
+        transactionRef: z3.string().optional(),
+        notes: z3.string().optional()
       })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         const { paymentId, ...fields } = input;
@@ -4493,7 +5081,7 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         }
         return { success: true };
       }),
-      delete: publicProcedure.input(z2.object({ paymentId: z2.number() })).mutation(async ({ ctx, input }) => {
+      delete: publicProcedure.input(z3.object({ paymentId: z3.number() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await deletePayment(input.paymentId);
         return { success: true };
@@ -4506,17 +5094,17 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         const prompts = await listSystemPrompts();
         return { prompts };
       }),
-      getActive: publicProcedure.input(z2.object({ modelSlug: z2.enum(["bizpilot", "founderpilot"]) })).query(async ({ ctx, input }) => {
+      getActive: publicProcedure.input(z3.object({ modelSlug: z3.enum(["bizpilot", "founderpilot"]) })).query(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         const content = await getActiveSystemPrompt(input.modelSlug);
         return { content };
       }),
-      save: publicProcedure.input(z2.object({ name: z2.string().min(1), modelSlug: z2.enum(["bizpilot", "founderpilot"]), content: z2.string().min(10), activate: z2.boolean().default(false) })).mutation(async ({ ctx, input }) => {
+      save: publicProcedure.input(z3.object({ name: z3.string().min(1), modelSlug: z3.enum(["bizpilot", "founderpilot"]), content: z3.string().min(10), activate: z3.boolean().default(false) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         const result = await createSystemPromptVersion({ name: input.name, modelSlug: input.modelSlug, content: input.content, activate: input.activate });
         return { success: true, promptId: result.id };
       }),
-      activate: publicProcedure.input(z2.object({ promptId: z2.number(), modelSlug: z2.string() })).mutation(async ({ ctx, input }) => {
+      activate: publicProcedure.input(z3.object({ promptId: z3.number(), modelSlug: z3.string() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await activateSystemPrompt(input.promptId, input.modelSlug);
         return { success: true };
@@ -4529,17 +5117,17 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         const keys = await listAllApiKeys();
         return { keys };
       }),
-      upsert: publicProcedure.input(z2.object({ provider: z2.enum(["openai", "gemini"]), keyValue: z2.string().min(10) })).mutation(async ({ ctx, input }) => {
+      upsert: publicProcedure.input(z3.object({ provider: z3.enum(["openai", "gemini"]), keyValue: z3.string().min(10) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await upsertApiKey(input.provider, input.keyValue);
         return { success: true };
       }),
-      setActive: publicProcedure.input(z2.object({ keyId: z2.number(), provider: z2.string() })).mutation(async ({ ctx, input }) => {
+      setActive: publicProcedure.input(z3.object({ keyId: z3.number(), provider: z3.string() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await setApiKeyActive(input.keyId, input.provider);
         return { success: true };
       }),
-      delete: publicProcedure.input(z2.object({ keyId: z2.number() })).mutation(async ({ ctx, input }) => {
+      delete: publicProcedure.input(z3.object({ keyId: z3.number() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await deleteApiKey(input.keyId);
         return { success: true };
@@ -4552,7 +5140,7 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         const models = await listAllAiModels();
         return { models };
       }),
-      update: publicProcedure.input(z2.object({ targetRole: z2.enum(["bizpilot", "founderpilot"]), modelString: z2.string().min(1) })).mutation(async ({ ctx, input }) => {
+      update: publicProcedure.input(z3.object({ targetRole: z3.enum(["bizpilot", "founderpilot"]), modelString: z3.string().min(1) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await updateAiModel(input.targetRole, input.modelString);
         return { success: true };
@@ -4565,21 +5153,21 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         const items = await listAnnouncements(false);
         return { announcements: items };
       }),
-      create: publicProcedure.input(z2.object({
-        title: z2.string().min(1),
-        content: z2.string().min(1),
-        type: z2.enum(["info", "success", "warning", "urgent"]).default("info")
+      create: publicProcedure.input(z3.object({
+        title: z3.string().min(1),
+        content: z3.string().min(1),
+        type: z3.enum(["info", "success", "warning", "urgent"]).default("info")
       })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         const result = await createAnnouncement(input);
         return { success: true, id: result.id };
       }),
-      toggle: publicProcedure.input(z2.object({ id: z2.number(), isActive: z2.enum(["true", "false"]) })).mutation(async ({ ctx, input }) => {
+      toggle: publicProcedure.input(z3.object({ id: z3.number(), isActive: z3.enum(["true", "false"]) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await updateAnnouncement(input.id, { isActive: input.isActive });
         return { success: true };
       }),
-      delete: publicProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ ctx, input }) => {
+      delete: publicProcedure.input(z3.object({ id: z3.number() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await deleteAnnouncement(input.id);
         return { success: true };
@@ -4613,8 +5201,8 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         return { success: true };
       }),
       setupWebhook: publicProcedure.input(
-        z2.object({
-          advisor: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot")
+        z3.object({
+          advisor: z3.enum(["bizpilot", "founderpilot"]).default("bizpilot")
         })
       ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
@@ -4627,15 +5215,15 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         }
       }),
       updatePlan: publicProcedure.input(
-        z2.object({
-          userId: z2.number(),
-          bizPlanTier: z2.enum(["starter", "unlimited"]).optional(),
-          founderPlanTier: z2.enum(["starter", "unlimited"]).optional(),
-          bizMessageLimit: z2.number().int().min(0).optional(),
-          founderMessageLimit: z2.number().int().min(0).optional(),
-          addBizMessages: z2.number().int().min(0).optional(),
-          addFounderMessages: z2.number().int().min(0).optional(),
-          planExpiryDate: z2.string().nullable().optional()
+        z3.object({
+          userId: z3.number(),
+          bizPlanTier: z3.enum(["starter", "unlimited"]).optional(),
+          founderPlanTier: z3.enum(["starter", "unlimited"]).optional(),
+          bizMessageLimit: z3.number().int().min(0).optional(),
+          founderMessageLimit: z3.number().int().min(0).optional(),
+          addBizMessages: z3.number().int().min(0).optional(),
+          addFounderMessages: z3.number().int().min(0).optional(),
+          planExpiryDate: z3.string().nullable().optional()
         })
       ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
@@ -4669,13 +5257,13 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         }
       }),
       quickAddUser: publicProcedure.input(
-        z2.object({
-          name: z2.string().min(1),
-          email: z2.string().email(),
-          planType: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
-          planTier: z2.enum(["starter", "unlimited"]).default("starter"),
-          planExpiryDate: z2.string().optional(),
-          botUsername: z2.string().min(1).optional()
+        z3.object({
+          name: z3.string().min(1),
+          email: z3.string().email(),
+          planType: z3.enum(["bizpilot", "founderpilot"]).default("bizpilot"),
+          planTier: z3.enum(["starter", "unlimited"]).default("starter"),
+          planExpiryDate: z3.string().optional(),
+          botUsername: z3.string().min(1).optional()
         })
       ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
@@ -4704,10 +5292,10 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         }
       }),
       createActivationToken: publicProcedure.input(
-        z2.object({
-          userId: z2.number(),
-          botUsername: z2.string().min(1).optional(),
-          planType: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot")
+        z3.object({
+          userId: z3.number(),
+          botUsername: z3.string().min(1).optional(),
+          planType: z3.enum(["bizpilot", "founderpilot"]).default("bizpilot")
         })
       ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
@@ -4724,10 +5312,10 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
       }),
       /** @deprecated Use createActivationToken */
       generateLink: publicProcedure.input(
-        z2.object({
-          userId: z2.number(),
-          botUsername: z2.string().min(1).optional(),
-          planType: z2.enum(["bizpilot", "founderpilot"]).default("bizpilot")
+        z3.object({
+          userId: z3.number(),
+          botUsername: z3.string().min(1).optional(),
+          planType: z3.enum(["bizpilot", "founderpilot"]).default("bizpilot")
         })
       ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
@@ -4744,11 +5332,11 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
       })
     }),
     sendBroadcastEmail: publicProcedure.input(
-      z2.object({
-        mode: z2.enum(["all_approved", "single"]),
-        userId: z2.number().int().positive().optional(),
-        subject: z2.string().min(1).max(200),
-        message: z2.string().min(1).max(2e4)
+      z3.object({
+        mode: z3.enum(["all_approved", "single"]),
+        userId: z3.number().int().positive().optional(),
+        subject: z3.string().min(1).max(200),
+        message: z3.string().min(1).max(2e4)
       })
     ).mutation(async ({ ctx, input }) => {
       await requireAdmin(ctx);
@@ -4800,14 +5388,14 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
         await requireAdmin(ctx);
         return await listExternalApiTokens();
       }),
-      create: publicProcedure.input(z2.object({ name: z2.string().min(1) })).mutation(async ({ ctx, input }) => {
+      create: publicProcedure.input(z3.object({ name: z3.string().min(1) })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         const { nanoid: nanoid4 } = await import("nanoid");
         const token = `ph_ext_${nanoid4(32)}`;
         const result = await createExternalApiToken(input.name, token);
         return { success: true, id: result.id, token };
       }),
-      delete: publicProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ ctx, input }) => {
+      delete: publicProcedure.input(z3.object({ id: z3.number() })).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         await deleteExternalApiToken(input.id);
         return { success: true };

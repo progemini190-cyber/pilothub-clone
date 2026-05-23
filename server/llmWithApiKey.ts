@@ -4,6 +4,7 @@
  *
  * Supports multimodal (vision) user turns via base64 image payloads.
  */
+import { assertOpenAiApiKeyConfigured, resolveOpenAiApiKey } from "./_core/aiKeys";
 import { getActiveApiKey, getAiModel } from "./db";
 import type { InvokeResult } from "./_core/llm";
 import { invokeLLM } from "./_core/llm";
@@ -34,6 +35,7 @@ export async function invokeAdvisorLLM(
   advisorSlug: AdvisorSlug,
   messages: LlmMessage[],
 ): Promise<string> {
+  const envOpenAiKey = resolveOpenAiApiKey();
   const aiModel = await getAiModel(advisorSlug);
   const configuredModel = aiModel?.modelString ?? DEFAULT_VISION_MODEL;
   const hasImages = chatHasImages(messages);
@@ -68,10 +70,11 @@ export async function invokeAdvisorLLM(
     }
   } else {
     const openaiKey = await getActiveApiKey("openai");
-    if (openaiKey?.keyValue) {
+    const openAiApiKey = openaiKey?.keyValue?.trim() || envOpenAiKey;
+    if (openAiApiKey) {
       try {
         return await invokeWithOpenAI({
-          apiKey: openaiKey.keyValue,
+          apiKey: openAiApiKey,
           model: modelString,
           systemPrompt: systemPromptText,
           chatMessages,
@@ -96,10 +99,24 @@ export async function invokeAdvisorLLM(
     }
   }
 
+  if (envOpenAiKey && !isGeminiModel) {
+    try {
+      return await invokeWithOpenAI({
+        apiKey: assertOpenAiApiKeyConfigured(),
+        model: modelString,
+        systemPrompt: systemPromptText,
+        chatMessages,
+      });
+    } catch (err) {
+      console.warn("[LLM] Env OPENAI_API_KEY failed, falling back to built-in:", err);
+    }
+  }
+
   const fallbackMessages = messages.map((m) => ({
     role: m.role as "system" | "user" | "assistant",
     content: m.content,
   }));
+  assertOpenAiApiKeyConfigured();
   const response = await invokeLLM({ messages: fallbackMessages });
   const content = response.choices[0]?.message?.content;
   return typeof content === "string" ? content : "Sorry, I could not generate a response.";
