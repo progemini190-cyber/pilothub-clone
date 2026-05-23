@@ -2810,7 +2810,7 @@ async function invokeLLM(params) {
     response_format
   } = params;
   const payload = {
-    model: "gemini-2.5-flash",
+    model: "gemini-1.5-pro",
     messages: messages4.map(normalizeMessage)
   };
   if (tools && tools.length > 0) {
@@ -2981,13 +2981,11 @@ var init_llmChat = __esm({
   "shared/llmChat.ts"() {
     "use strict";
     VISION_GEMINI_MODELS = [
-      "gemini-1.5-flash-latest",
-      "gemini-1.5-pro-latest",
-      "gemini-1.5-flash",
       "gemini-1.5-pro",
+      "gemini-1.5-flash",
       "gemini-2.0-flash",
       "gemini-2.5-flash",
-      "gemini-2.5-pro-preview-05-06"
+      "gemini-2.5-pro"
     ];
   }
 });
@@ -3215,7 +3213,7 @@ var init_llmWithApiKey = __esm({
     init_llmChat();
     TEMPERATURE = 0.3;
     MAX_OUTPUT_TOKENS = 4096;
-    DEFAULT_VISION_MODEL = "gemini-1.5-flash-latest";
+    DEFAULT_VISION_MODEL = "gemini-1.5-pro";
   }
 });
 

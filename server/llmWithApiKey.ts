@@ -18,7 +18,7 @@ export type AdvisorSlug = "bizpilot" | "founderpilot";
 
 const TEMPERATURE = 0.3;
 const MAX_OUTPUT_TOKENS = 4096;
-const DEFAULT_VISION_MODEL = "gemini-1.5-flash-latest";
+const DEFAULT_VISION_MODEL = "gemini-1.5-pro";
 
 function chatHasImages(msgs: LlmMessage[]): boolean {
   return msgs.some((m) => m.role !== "system" && Boolean(m.imageBase64?.trim()));

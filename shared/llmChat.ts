@@ -19,13 +19,11 @@ export type LlmMessage = {
 
 /** Vision-capable Gemini models (multimodal). */
 export const VISION_GEMINI_MODELS = [
-  "gemini-1.5-flash-latest",
-  "gemini-1.5-pro-latest",
-  "gemini-1.5-flash",
   "gemini-1.5-pro",
+  "gemini-1.5-flash",
   "gemini-2.0-flash",
   "gemini-2.5-flash",
-  "gemini-2.5-pro-preview-05-06",
+  "gemini-2.5-pro",
 ] as const;
 
 export function isVisionCapableGeminiModel(model: string): boolean {

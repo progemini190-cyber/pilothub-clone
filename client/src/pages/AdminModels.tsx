@@ -8,12 +8,10 @@ import { toast } from "sonner";
 import { PILOTHUB_LOGO_URL as LOGO_URL } from "@/lib/siteAssets";
 
 const GEMINI_MODELS = [
-  { value: "gemini-1.5-flash-latest", label: "Gemini 1.5 Flash (Vision, Recommended)" },
-  { value: "gemini-1.5-pro-latest", label: "Gemini 1.5 Pro (Vision)" },
+  { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro (Vision, Recommended)" },
   { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
   { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
   { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
   { value: "gemini-1.5-flash", label: "Gemini 1.5 Flash" },
 ];
 
@@ -76,7 +74,7 @@ export default function AdminModels() {
   const getModelString = (slug: string) => {
     if (editValues[slug] !== undefined) return editValues[slug];
     const dbModel = dbModels.find((m: any) => m.targetRole === slug);
-    return dbModel?.modelString ?? "gemini-2.5-pro";
+    return dbModel?.modelString ?? "gemini-1.5-pro";
   };
 
   const handleSave = (slug: "bizpilot" | "founderpilot") => {
@@ -104,7 +102,7 @@ export default function AdminModels() {
     <DashboardShell title="AI Model Configuration" activeTab="models" isAdminShell>
       <div className="space-y-6">
         <p className="text-sm" style={{ color: "oklch(55% 0.03 220)" }}>
-          Configure which AI model each advisor uses. Gemini 2.5 Pro is recommended for best performance.
+          Configure which AI model each advisor uses. Gemini 1.5 Pro is recommended for best performance.
         </p>
 
         {isLoading ? (
