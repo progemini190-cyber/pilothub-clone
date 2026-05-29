@@ -49,7 +49,7 @@ export function useAdvisorChat(modelSlug: "bizpilot" | "founderpilot", userId: n
   const usageQuery = trpc.ai.messageUsage.useQuery(undefined, { enabled: !!userId });
   const usage = modelSlug === "bizpilot" ? usageQuery.data?.biz : usageQuery.data?.founder;
   const messagesUsed = usage?.used ?? 0;
-  const messagesLimit = usage?.limit ?? 5;
+  const messagesLimit = usage?.limit ?? 3;
   const messagesLeft = Math.max(0, messagesLimit - messagesUsed);
   const isUnlimited = messagesLimit >= 99999;
   const isLimitReached = !isUnlimited && messagesLeft <= 0;

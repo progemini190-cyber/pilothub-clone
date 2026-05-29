@@ -65,8 +65,8 @@ export default function FounderPilot() {
           {!isUnlimited && (
             <div className="px-3 py-2" style={{ borderBottom: "1px solid oklch(22% 0.04 220)" }}>
               <div className="px-3 py-2 rounded-lg text-center"
-                style={{ background: messagesLeft <= 2 ? "oklch(60% 0.2 30 / 0.12)" : "oklch(75% 0.18 55 / 0.08)", border: `1px solid ${messagesLeft <= 2 ? "oklch(60% 0.2 30 / 0.3)" : "oklch(75% 0.18 55 / 0.2)"}` }}>
-                <p className="text-xs font-semibold" style={{ color: messagesLeft <= 2 ? "oklch(75% 0.2 30)" : "oklch(80% 0.18 55)" }}>
+                style={{ background: messagesLeft <= 1 ? "oklch(60% 0.2 30 / 0.12)" : "oklch(75% 0.18 55 / 0.08)", border: `1px solid ${messagesLeft <= 1 ? "oklch(60% 0.2 30 / 0.3)" : "oklch(75% 0.18 55 / 0.2)"}` }}>
+                <p className="text-xs font-semibold" style={{ color: messagesLeft <= 1 ? "oklch(75% 0.2 30)" : "oklch(80% 0.18 55)" }}>
                   {messagesLeft} / {messagesLimit} left
                 </p>
                 <p className="text-xs mt-0.5" style={{ color: "oklch(50% 0.03 220)" }}>
@@ -134,7 +134,7 @@ export default function FounderPilot() {
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-                  style={{ background: messagesLeft <= 2 ? "oklch(60% 0.2 30 / 0.08)" : "oklch(75% 0.18 55 / 0.08)", border: `1px solid ${messagesLeft <= 2 ? "oklch(60% 0.2 30 / 0.2)" : "oklch(75% 0.18 55 / 0.2)"}`, color: messagesLeft <= 2 ? "oklch(75% 0.2 30)" : "oklch(80% 0.18 55)" }}>
+                  style={{ background: messagesLeft <= 1 ? "oklch(60% 0.2 30 / 0.08)" : "oklch(75% 0.18 55 / 0.08)", border: `1px solid ${messagesLeft <= 1 ? "oklch(60% 0.2 30 / 0.2)" : "oklch(75% 0.18 55 / 0.2)"}`, color: messagesLeft <= 1 ? "oklch(75% 0.2 30)" : "oklch(80% 0.18 55)" }}>
                   {messagesLeft}/{messagesLimit}
                 </div>
               )}
@@ -273,7 +273,7 @@ export default function FounderPilot() {
             <p className="text-xs sm:text-sm mb-4 sm:mb-5" style={{ color: "oklch(65% 0.03 220)" }}>
               {hasPaidPlan
                 ? "Your plan message limit has been reached. Upgrade for more messages."
-                : "FounderPilot free trial (5 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် FounderPilot plan ဝယ်ယူပါ။"}
+                : "FounderPilot free trial (3 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် FounderPilot plan ဝယ်ယူပါ။"}
             </p>
             <button onClick={() => { setShowLimitModal(false); setLocation("/app/billing"); }}
               className="w-full py-2 sm:py-3 rounded-xl font-semibold text-xs sm:text-sm mb-2"

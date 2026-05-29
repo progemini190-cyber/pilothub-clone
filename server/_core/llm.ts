@@ -277,7 +277,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   } = params;
 
   const payload: Record<string, unknown> = {
-    model: "gemini-1.5-pro",
+    model: "gemini-2.5-pro",
     messages: messages.map(normalizeMessage),
   };
 

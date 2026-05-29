@@ -186,7 +186,7 @@ export default function Pricing() {
               <span className="text-3xl font-bold text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Free</span>
             </div>
             <ul className="space-y-3 mb-8 flex-1">
-              {["BizPilot AI (5 messages)", "Business Q&A", "Myanmar market insights"].map((f) => (
+              {["BizPilot AI (3 messages)", "Business Q&A", "Myanmar market insights"].map((f) => (
                 <li key={f} className="flex items-start gap-2.5 text-sm" style={{ color: "oklch(70% 0.02 220)" }}>
                   <Check className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "oklch(60% 0.03 220)" }} />
                   {f}
@@ -322,7 +322,7 @@ export default function Pricing() {
               <span className="text-3xl font-bold text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Free</span>
             </div>
             <ul className="space-y-3 mb-8 flex-1">
-              {["FounderPilot AI (5 messages)", "Strategic Q&A", "Startup insights"].map((f) => (
+              {["FounderPilot AI (3 messages)", "Strategic Q&A", "Startup insights"].map((f) => (
                 <li key={f} className="flex items-start gap-2.5 text-sm" style={{ color: "oklch(70% 0.02 220)" }}>
                   <Check className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "oklch(60% 0.03 220)" }} />
                   {f}

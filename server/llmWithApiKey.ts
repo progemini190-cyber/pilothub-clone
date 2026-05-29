@@ -18,8 +18,8 @@ export type AdvisorSlug = "bizpilot" | "founderpilot";
 
 const TEMPERATURE = 0.3;
 const MAX_OUTPUT_TOKENS = 4096;
-const DEFAULT_VISION_MODEL = "gemini-1.5-pro";
-const FALLBACK_VISION_MODEL = "gemini-1.5-flash";
+const DEFAULT_VISION_MODEL = "gemini-2.5-pro";
+const FALLBACK_VISION_MODEL = "gemini-2.5-flash";
 const FETCH_TIMEOUT_MS = 55_000;
 
 async function fetchWithTimeout(
@@ -92,7 +92,7 @@ async function _invokeAdvisorLLMInner(
   if (isGeminiModel) {
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
-      // Primary attempt: configured model (default: gemini-1.5-pro)
+      // Primary attempt: configured model (default: gemini-2.5-pro)
       try {
         console.log(`[LLM] Attempting Gemini primary model: ${modelString}`);
         return await invokeWithGemini({
@@ -105,7 +105,7 @@ async function _invokeAdvisorLLMInner(
         console.error(`[LLM] Gemini primary model (${modelString}) failed:`, err);
       }
 
-      // Fallback: gemini-1.5-flash if primary was gemini-1.5-pro
+      // Fallback: gemini-2.5-flash if primary model fails
       if (modelString !== FALLBACK_VISION_MODEL) {
         try {
           console.log(`[LLM] Attempting Gemini fallback model: ${FALLBACK_VISION_MODEL}`);

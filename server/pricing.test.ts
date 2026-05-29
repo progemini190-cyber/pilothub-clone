@@ -5,14 +5,14 @@ import { describe, it, expect } from "vitest";
 
 describe("Tiered Pricing Logic", () => {
   describe("Message limit calculation", () => {
-    it("free tier has 5 message limit for BizPilot", () => {
-      const FREE_BIZ_LIMIT = 5;
-      expect(FREE_BIZ_LIMIT).toBe(5);
+    it("free tier has 3 message limit for BizPilot", () => {
+      const FREE_BIZ_LIMIT = 3;
+      expect(FREE_BIZ_LIMIT).toBe(3);
     });
 
-    it("free tier has 5 message limit for FounderPilot", () => {
-      const FREE_FOUNDER_LIMIT = 5;
-      expect(FREE_FOUNDER_LIMIT).toBe(5);
+    it("free tier has 3 message limit for FounderPilot", () => {
+      const FREE_FOUNDER_LIMIT = 3;
+      expect(FREE_FOUNDER_LIMIT).toBe(3);
     });
 
     it("starter pack has 20 message limit", () => {
@@ -77,35 +77,35 @@ describe("Tiered Pricing Logic", () => {
   });
 
   describe("Plan activation logic", () => {
-    it("free plan sets 5 message limits", () => {
+    it("free plan sets 3 message limits", () => {
       const planType = "free";
-      const bizLimit = planType === "free" ? 5 : planType === "starter" ? 20 : 99999;
-      const founderLimit = planType === "free" ? 5 : planType === "starter" ? 20 : 99999;
-      expect(bizLimit).toBe(5);
-      expect(founderLimit).toBe(5);
+      const bizLimit = planType === "free" ? 3 : planType === "starter" ? 20 : 99999;
+      const founderLimit = planType === "free" ? 3 : planType === "starter" ? 20 : 99999;
+      expect(bizLimit).toBe(3);
+      expect(founderLimit).toBe(3);
     });
 
     it("starter_biz plan sets 20 biz message limit", () => {
       const planType = "starter_biz";
-      const bizLimit = planType === "starter_biz" ? 20 : 5;
+      const bizLimit = planType === "starter_biz" ? 20 : 3;
       expect(bizLimit).toBe(20);
     });
 
     it("starter_founder plan sets 20 founder message limit", () => {
       const planType = "starter_founder";
-      const founderLimit = planType === "starter_founder" ? 20 : 5;
+      const founderLimit = planType === "starter_founder" ? 20 : 3;
       expect(founderLimit).toBe(20);
     });
 
     it("pro_biz plan sets unlimited biz messages", () => {
       const planType = "pro_biz";
-      const bizLimit = planType === "pro_biz" ? 99999 : 5;
+      const bizLimit = planType === "pro_biz" ? 99999 : 3;
       expect(bizLimit).toBe(99999);
     });
 
     it("pro_founder plan sets unlimited founder messages", () => {
       const planType = "pro_founder";
-      const founderLimit = planType === "pro_founder" ? 99999 : 5;
+      const founderLimit = planType === "pro_founder" ? 99999 : 3;
       expect(founderLimit).toBe(99999);
     });
   });
@@ -160,7 +160,7 @@ describe("Tiered Pricing Logic", () => {
     });
 
     it("does not flag free as unlimited", () => {
-      const limit = 5;
+      const limit = 3;
       const isUnlimited = limit >= 99999;
       expect(isUnlimited).toBe(false);
     });

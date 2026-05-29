@@ -38,8 +38,8 @@ const SKIP_SEEDS = args.has("--skip-seeds");
 
 /** Default model strings used when `aiModels` table is empty (see server/llmWithApiKey.ts). */
 const DEFAULT_AI_MODELS = [
-  { targetRole: "bizpilot", modelString: "gemini-1.5-pro" },
-  { targetRole: "founderpilot", modelString: "gemini-1.5-pro" },
+  { targetRole: "bizpilot", modelString: "gemini-2.5-pro" },
+  { targetRole: "founderpilot", modelString: "gemini-2.5-pro" },
 ] as const;
 
 const TABLES_FROM_JSON = [
@@ -158,8 +158,8 @@ function applyUserDefaults(row: Row): Row {
   if (!row.status) row.status = "active";
   if (!row.planTypeBiz) row.planTypeBiz = "free";
   if (!row.planTypeFounder) row.planTypeFounder = "free";
-  if (row.bizMessageLimit == null) row.bizMessageLimit = 5;
-  if (row.founderMessageLimit == null) row.founderMessageLimit = 5;
+  if (row.bizMessageLimit == null) row.bizMessageLimit = 3;
+  if (row.founderMessageLimit == null) row.founderMessageLimit = 3;
   if (row.bizMessagesUsed == null) row.bizMessagesUsed = 0;
   if (row.founderMessagesUsed == null) row.founderMessagesUsed = 0;
   if (!row.hasUsedBizStarter) row.hasUsedBizStarter = "false";

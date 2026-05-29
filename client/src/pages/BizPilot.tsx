@@ -135,7 +135,7 @@ export default function BizPilot() {
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-                  style={{ background: messagesLeft <= 3 && !hasPaidPlan ? "oklch(60% 0.2 30 / 0.08)" : "oklch(60% 0.2 220 / 0.08)", border: `1px solid ${messagesLeft <= 3 && !hasPaidPlan ? "oklch(60% 0.2 30 / 0.2)" : "oklch(60% 0.2 220 / 0.2)"}`, color: messagesLeft <= 3 && !hasPaidPlan ? "oklch(75% 0.2 30)" : "oklch(75% 0.2 220)" }}>
+                  style={{ background: messagesLeft <= 1 && !hasPaidPlan ? "oklch(60% 0.2 30 / 0.08)" : "oklch(60% 0.2 220 / 0.08)", border: `1px solid ${messagesLeft <= 1 && !hasPaidPlan ? "oklch(60% 0.2 30 / 0.2)" : "oklch(60% 0.2 220 / 0.2)"}`, color: messagesLeft <= 1 && !hasPaidPlan ? "oklch(75% 0.2 30)" : "oklch(75% 0.2 220)" }}>
                   {messagesLeft}/{messagesLimit}
                 </div>
               )}
@@ -287,7 +287,7 @@ export default function BizPilot() {
             <p className="text-xs sm:text-sm mb-4 sm:mb-5" style={{ color: "oklch(65% 0.03 220)" }}>
               {hasPaidPlan
                 ? "Your plan message limit has been reached. Upgrade for more messages."
-                : "BizPilot free trial (5 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် BizPilot plan ဝယ်ယူပါ။"}
+                : "BizPilot free trial (3 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် BizPilot plan ဝယ်ယူပါ။"}
             </p>
             <button onClick={() => { setShowLimitModal(false); setLocation("/app/billing"); }}
               className="w-full py-2 sm:py-3 rounded-xl font-semibold text-xs sm:text-sm mb-2"

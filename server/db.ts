@@ -215,6 +215,7 @@ export async function linkUserToGoogleOpenId(
 
 export const WEB_CHAT_UNLIMITED_LIMIT = 999999;
 export const WEB_CHAT_STARTER_LIMIT = 20;
+export const WEB_CHAT_FREE_TRIAL_LIMIT = 3;
 
 function planAppliesToAdvisor(
   planKey: string | null | undefined,
@@ -239,7 +240,9 @@ function isUnlimitedWebAdvisorUsage(
   const tierPlan = advisor === "bizpilot" ? row.planTypeBiz : row.planTypeFounder;
   if (tierPlan === "pro") return true;
   const limit =
-    advisor === "bizpilot" ? row.bizMessageLimit ?? 5 : row.founderMessageLimit ?? 5;
+    advisor === "bizpilot"
+      ? row.bizMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT
+      : row.founderMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT;
   if (limit >= WEB_CHAT_UNLIMITED_LIMIT) return true;
   if (!planAppliesToAdvisor(row.plan, advisor)) return false;
   return isProTierPlan(row.plan);
@@ -259,13 +262,16 @@ function webMessageLimitForAdvisor(
   if (isUnlimitedWebAdvisorUsage(advisor, row)) return WEB_CHAT_UNLIMITED_LIMIT;
   const tierPlan = advisor === "bizpilot" ? row.planTypeBiz : row.planTypeFounder;
   const storedLimit =
-    advisor === "bizpilot" ? row.bizMessageLimit ?? 5 : row.founderMessageLimit ?? 5;
+    advisor === "bizpilot"
+      ? row.bizMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT
+      : row.founderMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT;
   if (planAppliesToAdvisor(row.plan, advisor)) {
     const tier = parsePlanKey(row.plan).tier;
     if (tier === "starter") return Math.max(storedLimit, WEB_CHAT_STARTER_LIMIT);
     if (tier === "pro") return WEB_CHAT_UNLIMITED_LIMIT;
   }
   if (tierPlan === "starter") return Math.max(storedLimit, WEB_CHAT_STARTER_LIMIT);
+  if (!tierPlan || tierPlan === "free") return WEB_CHAT_FREE_TRIAL_LIMIT;
   return storedLimit;
 }
 
@@ -278,7 +284,7 @@ export async function getMessageUsage(userId: number, advisor: "bizpilot" | "fou
   if (!db) {
     return {
       used: 0,
-      limit: 5,
+      limit: WEB_CHAT_FREE_TRIAL_LIMIT,
       planType: "free" as const,
       hasUsedStarter: false,
       hasPaidPlan: false,
@@ -300,7 +306,7 @@ export async function getMessageUsage(userId: number, advisor: "bizpilot" | "fou
   if (!row) {
     return {
       used: 0,
-      limit: 5,
+      limit: WEB_CHAT_FREE_TRIAL_LIMIT,
       planType: "free" as const,
       hasUsedStarter: false,
       hasPaidPlan: false,
