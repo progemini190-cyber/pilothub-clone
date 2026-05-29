@@ -20,9 +20,9 @@ const TEMPERATURE = 0.3;
 const MAX_OUTPUT_TOKENS = 4096;
 const DEFAULT_VISION_MODEL = "gemini-2.5-pro";
 const FALLBACK_VISION_MODEL = "gemini-2.5-flash";
-const FETCH_TIMEOUT_MS = 55_000;
+export const FETCH_TIMEOUT_MS = 55_000;
 
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   options: RequestInit,
   timeoutMs = FETCH_TIMEOUT_MS,

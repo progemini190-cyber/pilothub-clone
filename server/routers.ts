@@ -24,11 +24,9 @@ import { isAdminEmail } from "./_core/adminAccess";
 import { hashPassword, verifyPassword } from "./_core/passwordAuth";
 import { setUserSessionCookie } from "./_core/sessionCookie";
 import { userNeedsOnboarding } from "@shared/onboarding";
+import { LLM_USER_ERROR_MESSAGE } from "@shared/llmChat";
 
 const COOKIE_NAME = "app_session_id";
-
-const LLM_USER_ERROR_MESSAGE =
-  "pilothub ai model များ ပြဿနာ အနည်းငယ်ရှိပါသည်။ နောက်မှ ပြန်လည်စမ်းသပ်ပါ။";
 
 async function requireAdmin(ctx: {
   req: { cookies?: Record<string, string> };

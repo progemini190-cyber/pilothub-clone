@@ -1,5 +1,9 @@
 /** Shared types for multimodal advisor chat (web + server). */
 
+/** Shown to users when LLM generation fails (web chat + Telegram). */
+export const LLM_USER_ERROR_MESSAGE =
+  "pilothub ai model များ ပြဿနာ အနည်းငယ်ရှိပါသည်။ နောက်မှ ပြန်လည်စမ်းသပ်ပါ။";
+
 export type AdvisorSlug = "bizpilot" | "founderpilot";
 
 export type LlmChatTurn = {

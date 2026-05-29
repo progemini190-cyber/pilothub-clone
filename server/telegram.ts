@@ -10,8 +10,9 @@ import { nanoid } from "nanoid";
 import * as db from "./db";
 import type { AdvisorSlug } from "./db";
 import { ensureTelegramSchema } from "./db/ensureTelegramSchema";
-import { invokeAdvisorLLM } from "./llmWithApiKey";
+import { fetchWithTimeout, invokeAdvisorLLM } from "./llmWithApiKey";
 import { appendAdvisorSafetyPrompt } from "@shared/chatSafety";
+import { LLM_USER_ERROR_MESSAGE } from "@shared/llmChat";
 import {
   buildTelegramStartLink,
   resolveTelegramActivationBotUsername,
@@ -31,8 +32,6 @@ const LINK_SUCCESS_MSG =
   "အကောင့်ချိတ်ဆက်မှု အောင်မြင်ပါသည်။ စတင်မေးမြန်းနိုင်ပါပြီ။";
 const INVALID_TOKEN_MSG =
   "ချိတ်ဆက်မှုမအောင်မြင်ပါ။ Admin ထံမှ ရရှိသော activation link ကို ပြန်စမ်းကြည့်ပါ။";
-const SYSTEM_ERROR_MSG =
-  "စနစ်ချို့ယွင်းနေပါသည်။ ခဏနေမှ ထပ်မံကြိုးစားကြည့်ပါ။";
 const ALREADY_LINKED_MSG =
   "အကောင့် ချိတ်ဆက်ပြီးသားဖြစ်ပါသည်။ စာသားပို့ပြီး မေးမြန်းနိုင်ပါပြီ။";
 
@@ -156,15 +155,19 @@ async function sendTelegramMessage(
 ): Promise<boolean> {
   try {
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        reply_markup: PERSISTENT_REPLY_KEYBOARD,
-      }),
-    });
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          reply_markup: PERSISTENT_REPLY_KEYBOARD,
+        }),
+      },
+      30_000,
+    );
     if (!response.ok) {
       const body = await response.text();
       console.error("[Telegram] sendMessage failed:", response.status, body);
@@ -184,11 +187,15 @@ async function sendTypingChatAction(
 ): Promise<void> {
   try {
     const url = `https://api.telegram.org/bot${botToken}/sendChatAction`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, action: "typing" }),
-    });
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+      },
+      15_000,
+    );
     if (!response.ok) {
       const body = await response.text();
       console.warn("[Telegram] sendChatAction typing failed:", response.status, body);
@@ -220,6 +227,16 @@ async function handleStartLink(
   await sendTelegramMessage(botToken, chatId, LINK_SUCCESS_MSG);
 }
 
+async function sendLlmFailureReply(
+  botToken: string,
+  chatId: string | number,
+): Promise<void> {
+  const sent = await sendTelegramMessage(botToken, chatId, LLM_USER_ERROR_MESSAGE);
+  if (!sent) {
+    console.error("[Telegram] Failed to deliver LLM error message to chat:", chatId);
+  }
+}
+
 async function handleChatMessage(
   chatId: string,
   userText: string,
@@ -227,123 +244,135 @@ async function handleChatMessage(
   advisorQuery: string | undefined,
   botToken: string,
 ): Promise<void> {
-  const user = await safeGetUserByTelegramChatId(chatId);
-  if (!user) {
-    await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
-    return;
-  }
+  try {
+    const user = await safeGetUserByTelegramChatId(chatId);
+    if (!user) {
+      await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
+      return;
+    }
 
-  const isBiz = advisorSlug === "bizpilot";
-  const rawLimit = isBiz ? user.bizMessageLimit : user.founderMessageLimit;
-  const isUnlimited = isUnlimitedTelegramLimit(rawLimit);
-  const currentLimit = db.coerceTelegramMessageLimit(rawLimit);
-  const isExpired = !db.isTelegramPlanActive(user.planExpiryDate ?? null);
+    const isBiz = advisorSlug === "bizpilot";
+    const rawLimit = isBiz ? user.bizMessageLimit : user.founderMessageLimit;
+    const isUnlimited = isUnlimitedTelegramLimit(rawLimit);
+    const currentLimit = db.coerceTelegramMessageLimit(rawLimit);
+    const isExpired = !db.isTelegramPlanActive(user.planExpiryDate ?? null);
 
-  console.log("Credit check:", {
-    userId: user.id,
-    advisorQuery,
-    advisorSlug,
-    isBiz,
-    isUnlimited,
-    currentLimit,
-    bizMessageLimit: user.bizMessageLimit,
-    founderMessageLimit: user.founderMessageLimit,
-    expiry: user.planExpiryDate,
-    isExpired,
-  });
+    console.log("Credit check:", {
+      userId: user.id,
+      advisorQuery,
+      advisorSlug,
+      isBiz,
+      isUnlimited,
+      currentLimit,
+      bizMessageLimit: user.bizMessageLimit,
+      founderMessageLimit: user.founderMessageLimit,
+      expiry: user.planExpiryDate,
+      isExpired,
+    });
 
-  if (isUnlimited) {
-    if (isExpired) {
-      console.log("[Telegram] Unlimited plan expired — denying access", {
+    if (isUnlimited) {
+      if (isExpired) {
+        console.log("[Telegram] Unlimited plan expired — denying access", {
+          userId: user.id,
+          chatId,
+          isBiz,
+        });
+        await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
+        return;
+      }
+    } else if (currentLimit <= 0 || isExpired) {
+      console.log("[Telegram] Credit check failed — denying access", {
         userId: user.id,
-        chatId,
-        isBiz,
+        advisorQuery,
+        advisorSlug,
+        currentLimit,
+        isExpired,
       });
       await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
       return;
     }
-  } else if (currentLimit <= 0 || isExpired) {
-    console.log("[Telegram] Credit check failed — denying access", {
-      userId: user.id,
-      advisorQuery,
-      advisorSlug,
-      currentLimit,
-      isExpired,
-    });
-    await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
-    return;
-  }
 
-  const systemPrompt = await db.getActiveSystemPrompt(advisorSlug);
-  const fallback =
-    advisorSlug === "bizpilot"
-      ? "You are BizPilot, an expert business advisor for Myanmar businesses."
-      : "You are FounderPilot, a strategic advisor for founders and CEOs.";
+    const systemPrompt = await db.getActiveSystemPrompt(advisorSlug);
+    const fallback =
+      advisorSlug === "bizpilot"
+        ? "You are BizPilot, an expert business advisor for Myanmar businesses."
+        : "You are FounderPilot, a strategic advisor for founders and CEOs.";
 
-  const profileCtx = [
-    `\n\n[User Profile]`,
-    `- Name: ${user.name ?? "Unknown"}`,
-    user.businessName ? `- Business Name: ${user.businessName}` : null,
-    user.businessType ? `- Business Type: ${user.businessType}` : null,
-    user.useCase ? `- How they use PilotHub: ${user.useCase}` : null,
-    `- Channel: Telegram (${advisorSlug})`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+    const profileCtx = [
+      `\n\n[User Profile]`,
+      `- Name: ${user.name ?? "Unknown"}`,
+      user.businessName ? `- Business Name: ${user.businessName}` : null,
+      user.businessType ? `- Business Type: ${user.businessType}` : null,
+      user.useCase ? `- How they use PilotHub: ${user.useCase}` : null,
+      `- Channel: Telegram (${advisorSlug})`,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-  const history = await db.listRecentTelegramLlmTurnsForAdvisor(user.id, advisorSlug, 40);
+    const history = await db.listRecentTelegramLlmTurnsForAdvisor(user.id, advisorSlug, 40);
 
-  const llmMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-    {
-      role: "system",
-      content: appendAdvisorSafetyPrompt((systemPrompt || fallback) + profileCtx, advisorSlug),
-    },
-    ...history.map((h) => ({ role: h.role, content: h.content })),
-    { role: "user", content: userText },
-  ];
+    const llmMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      {
+        role: "system",
+        content: appendAdvisorSafetyPrompt((systemPrompt || fallback) + profileCtx, advisorSlug),
+      },
+      ...history.map((h) => ({ role: h.role, content: h.content })),
+      { role: "user", content: userText },
+    ];
 
-  /** Fire-and-forget so we don't delay Gemini; Telegram shows typing while request is in flight. */
-  void sendTypingChatAction(botToken, chatId).catch(() => {});
+    /** Fire-and-forget so we don't delay LLM; Telegram shows typing while request is in flight. */
+    void sendTypingChatAction(botToken, chatId).catch(() => {});
 
-  let reply: string;
-  try {
-    reply = await invokeAdvisorLLM(advisorSlug, llmMessages);
-  } catch (err) {
-    console.error("[Telegram] LLM error:", err);
-    await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
-    return;
-  }
-
-  const sent = await sendTelegramMessage(botToken, chatId, reply);
-  if (!sent) {
-    console.error("[Telegram] Gemini reply was not delivered; limit not decremented", {
-      userId: user.id,
-      advisorSlug,
-    });
-    return;
-  }
-
-  if (isUnlimited) {
-    console.log("[Telegram] Unlimited plan — skip limit decrement", { chatId, isBiz });
-  } else {
+    let reply: string;
     try {
-      await db.decrementTelegramMessageLimit(user.id, isBiz);
-      console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
+      reply = await invokeAdvisorLLM(advisorSlug, llmMessages);
     } catch (err) {
-      console.error("[Telegram] Failed to decrement message limit:", {
-        chatId,
-        userId: user.id,
-        isBiz,
-        advisorSlug,
-        err,
-      });
+      console.error("[Telegram Webhook] Error: ", err);
+      await sendLlmFailureReply(botToken, chatId);
+      return;
     }
-  }
 
-  try {
-    await db.appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+    if (!reply?.trim()) {
+      console.error("[Telegram] LLM returned empty reply", { userId: user.id, advisorSlug });
+      await sendLlmFailureReply(botToken, chatId);
+      return;
+    }
+
+    const sent = await sendTelegramMessage(botToken, chatId, reply);
+    if (!sent) {
+      console.error("[Telegram] LLM reply was not delivered; limit not decremented", {
+        userId: user.id,
+        advisorSlug,
+      });
+      await sendLlmFailureReply(botToken, chatId);
+      return;
+    }
+
+    if (isUnlimited) {
+      console.log("[Telegram] Unlimited plan — skip limit decrement", { chatId, isBiz });
+    } else {
+      try {
+        await db.decrementTelegramMessageLimit(user.id, isBiz);
+        console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
+      } catch (err) {
+        console.error("[Telegram] Failed to decrement message limit:", {
+          chatId,
+          userId: user.id,
+          isBiz,
+          advisorSlug,
+          err,
+        });
+      }
+    }
+
+    try {
+      await db.appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+    } catch (err) {
+      console.error("[Telegram] appendTelegramLlmTurnPair failed (reply already sent):", err);
+    }
   } catch (err) {
-    console.error("[Telegram] appendTelegramLlmTurnPair failed (reply already sent):", err);
+    console.error("[Telegram Webhook] Error: ", err);
+    await sendLlmFailureReply(botToken, chatId);
   }
 }
 
@@ -443,12 +472,12 @@ export function registerTelegramRoutes(app: Express): void {
       chatId = extractChatId(update);
       await processUpdate(update, advisor, advisorQuery, botToken);
     } catch (err) {
-      console.error("[Telegram] Webhook processing error:", err);
+      console.error("[Telegram Webhook] Error: ", err);
       if (botToken && chatId) {
         try {
-          await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
+          await sendLlmFailureReply(botToken, chatId);
         } catch (sendErr) {
-          console.error("[Telegram] Failed to send error reply:", sendErr);
+          console.error("[Telegram Webhook] Error: ", sendErr);
         }
       }
     } finally {
