@@ -19,6 +19,27 @@ export type AdvisorSlug = "bizpilot" | "founderpilot";
 const TEMPERATURE = 0.3;
 const MAX_OUTPUT_TOKENS = 4096;
 const DEFAULT_VISION_MODEL = "gemini-1.5-pro";
+const FALLBACK_VISION_MODEL = "gemini-1.5-flash";
+const FETCH_TIMEOUT_MS = 55_000;
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`LLM request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function chatHasImages(msgs: LlmMessage[]): boolean {
   return msgs.some((m) => m.role !== "system" && Boolean(m.imageBase64?.trim()));
@@ -35,12 +56,26 @@ export async function invokeAdvisorLLM(
   advisorSlug: AdvisorSlug,
   messages: LlmMessage[],
 ): Promise<string> {
+  try {
+    return await _invokeAdvisorLLMInner(advisorSlug, messages);
+  } catch (err) {
+    console.error("[LLM] invokeAdvisorLLM Generation Error Details:", err);
+    throw err;
+  }
+}
+
+async function _invokeAdvisorLLMInner(
+  advisorSlug: AdvisorSlug,
+  messages: LlmMessage[],
+): Promise<string> {
   const envOpenAiKey = resolveOpenAiApiKey();
   const aiModel = await getAiModel(advisorSlug);
   const configuredModel = aiModel?.modelString ?? DEFAULT_VISION_MODEL;
   const hasImages = chatHasImages(messages);
   const modelString = resolveGeminiModel(configuredModel, hasImages);
   const isGeminiModel = modelString.startsWith("gemini");
+
+  console.log(`[LLM] advisor=${advisorSlug} model=${modelString} hasImages=${hasImages}`);
 
   const systemMsg = messages.find((m) => m.role === "system");
   const systemPromptText = systemMsg?.content ?? "";
@@ -57,7 +92,9 @@ export async function invokeAdvisorLLM(
   if (isGeminiModel) {
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
+      // Primary attempt: configured model (default: gemini-1.5-pro)
       try {
+        console.log(`[LLM] Attempting Gemini primary model: ${modelString}`);
         return await invokeWithGemini({
           apiKey: geminiKey.keyValue,
           model: modelString,
@@ -65,14 +102,32 @@ export async function invokeAdvisorLLM(
           chatMessages,
         });
       } catch (err) {
-        console.warn("[LLM] Gemini key failed, falling back to built-in:", err);
+        console.error(`[LLM] Gemini primary model (${modelString}) failed:`, err);
       }
+
+      // Fallback: gemini-1.5-flash if primary was gemini-1.5-pro
+      if (modelString !== FALLBACK_VISION_MODEL) {
+        try {
+          console.log(`[LLM] Attempting Gemini fallback model: ${FALLBACK_VISION_MODEL}`);
+          return await invokeWithGemini({
+            apiKey: geminiKey.keyValue,
+            model: FALLBACK_VISION_MODEL,
+            systemPrompt: systemPromptText,
+            chatMessages,
+          });
+        } catch (err) {
+          console.error(`[LLM] Gemini fallback model (${FALLBACK_VISION_MODEL}) also failed:`, err);
+        }
+      }
+    } else {
+      console.warn("[LLM] No Gemini API key found in database for advisor:", advisorSlug);
     }
   } else {
     const openaiKey = await getActiveApiKey("openai");
     const openAiApiKey = openaiKey?.keyValue?.trim() || envOpenAiKey;
     if (openAiApiKey) {
       try {
+        console.log(`[LLM] Attempting OpenAI model: ${modelString}`);
         return await invokeWithOpenAI({
           apiKey: openAiApiKey,
           model: modelString,
@@ -80,13 +135,14 @@ export async function invokeAdvisorLLM(
           chatMessages,
         });
       } catch (err) {
-        console.warn("[LLM] OpenAI key failed, trying Gemini:", err);
+        console.error("[LLM] OpenAI key failed, trying Gemini:", err);
       }
     }
 
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
       try {
+        console.log(`[LLM] Attempting Gemini cross-fallback model: ${DEFAULT_VISION_MODEL}`);
         return await invokeWithGemini({
           apiKey: geminiKey.keyValue,
           model: resolveGeminiModel(DEFAULT_VISION_MODEL, hasImages),
@@ -94,13 +150,14 @@ export async function invokeAdvisorLLM(
           chatMessages,
         });
       } catch (err) {
-        console.warn("[LLM] Gemini fallback failed, using built-in:", err);
+        console.error("[LLM] Gemini cross-fallback also failed:", err);
       }
     }
   }
 
   if (envOpenAiKey && !isGeminiModel) {
     try {
+      console.log("[LLM] Attempting env OPENAI_API_KEY fallback");
       return await invokeWithOpenAI({
         apiKey: assertOpenAiApiKeyConfigured(),
         model: modelString,
@@ -108,10 +165,12 @@ export async function invokeAdvisorLLM(
         chatMessages,
       });
     } catch (err) {
-      console.warn("[LLM] Env OPENAI_API_KEY failed, falling back to built-in:", err);
+      console.error("[LLM] Env OPENAI_API_KEY fallback also failed:", err);
     }
   }
 
+  // Last resort: platform built-in LLM
+  console.log("[LLM] All key-based paths exhausted, attempting platform built-in LLM");
   const fallbackMessages = messages.map((m) => ({
     role: m.role as "system" | "user" | "assistant",
     content: m.content,
@@ -159,7 +218,7 @@ async function invokeWithOpenAI(params: {
     }
   }
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -239,7 +298,7 @@ async function invokeWithGemini(params: {
     };
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),

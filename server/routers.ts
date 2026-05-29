@@ -250,7 +250,17 @@ export const appRouter = router({
             }),
           });
         }
-        return await runAdvisorChatMutation("bizpilot", user, input);
+        try {
+          return await runAdvisorChatMutation("bizpilot", user, input);
+        } catch (err) {
+          console.error("[Router] bizpilot mutation failed:", err);
+          if (err instanceof TRPCError) throw err;
+          const message = err instanceof Error ? err.message : "Unknown error";
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `System Error: Unable to reach AI provider. Please check logs. (${message})`,
+          });
+        }
       }),
 
     founderpilot: approvedProcedure
@@ -271,7 +281,17 @@ export const appRouter = router({
             }),
           });
         }
-        return await runAdvisorChatMutation("founderpilot", user, input);
+        try {
+          return await runAdvisorChatMutation("founderpilot", user, input);
+        } catch (err) {
+          console.error("[Router] founderpilot mutation failed:", err);
+          if (err instanceof TRPCError) throw err;
+          const message = err instanceof Error ? err.message : "Unknown error";
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `System Error: Unable to reach AI provider. Please check logs. (${message})`,
+          });
+        }
       }),
   }),
 

@@ -98,7 +98,14 @@ export async function runAdvisorChatMutation(
     },
   ];
 
-  const assistantMessage = await invokeAdvisorLLM(advisor, llmMessages);
+  let assistantMessage: string;
+  try {
+    assistantMessage = await invokeAdvisorLLM(advisor, llmMessages);
+  } catch (err) {
+    console.error(`[AdvisorChat] LLM Generation Error Details for advisor=${advisor} userId=${user.id}:`, err);
+    throw err;
+  }
+
   await db.createMessage({ conversationId: conv.id, role: "assistant", content: assistantMessage });
   await db.touchConversation(conv.id);
   if (history.length <= 1) {
