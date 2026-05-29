@@ -145,6 +145,8 @@ describe("telegram webhook token routing", () => {
     process.env.TELEGRAM_FOUNDERPILOT_TOKEN = "founder-token";
     delete process.env.TELEGRAM_BIZ_BOT_TOKEN;
     delete process.env.TELEGRAM_FOUNDER_BOT_TOKEN;
+    delete process.env.TELEGRAM_BOT_TOKEN_BIZ;
+    delete process.env.TELEGRAM_BOT_TOKEN_FOUNDER;
   });
 
   it("routes founder advisor query to TELEGRAM_FOUNDERPILOT_TOKEN", () => {
@@ -153,5 +155,14 @@ describe("telegram webhook token routing", () => {
     expect(getTelegramBotToken("founderpilot")).toBe("founder-token");
     expect(getTelegramBotToken("bizpilot")).toBe("biz-token");
     expect(getTelegramBotToken(undefined)).toBe("biz-token");
+  });
+
+  it("falls back to TELEGRAM_BOT_TOKEN_BIZ and TELEGRAM_BOT_TOKEN_FOUNDER aliases", () => {
+    delete process.env.TELEGRAM_BIZPILOT_TOKEN;
+    delete process.env.TELEGRAM_FOUNDERPILOT_TOKEN;
+    process.env.TELEGRAM_BOT_TOKEN_BIZ = "alias-biz";
+    process.env.TELEGRAM_BOT_TOKEN_FOUNDER = "alias-founder";
+    expect(getTelegramBotToken("bizpilot")).toBe("alias-biz");
+    expect(getTelegramBotToken("founderpilot")).toBe("alias-founder");
   });
 });
