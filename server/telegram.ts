@@ -4,6 +4,9 @@
  * (defaults to bizpilot when omitted)
  */
 
+/** Public webhook path — excluded from auth middleware (see middleware.ts). */
+export const TELEGRAM_WEBHOOK_PATH = "/api/telegram/webhook";
+
 import type { Express, Request, Response } from "express";
 import { getPublicOrigin } from "./_core/oauth";
 import { nanoid } from "nanoid";
@@ -428,62 +431,72 @@ async function processUpdate(
   await handleChatMessage(chatId, text, advisorSlug, advisorQuery, botToken);
 }
 
-export function registerTelegramRoutes(app: Express): void {
-  app.post("/api/telegram/webhook", async (req: Request, res: Response) => {
-    console.log("Received Telegram message:", req.body);
+async function processTelegramWebhook(req: Request): Promise<void> {
+  let botToken: string | undefined;
+  let chatId: string | undefined;
 
-    let botToken: string | undefined;
-    let chatId: string | undefined;
-
-    try {
-      const body = req.body as { message?: { text?: string; chat?: { id?: number } } };
-      if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
-        await ensureTelegramSchema();
-        const advisorQuery = extractAdvisorQuery(req);
-        const advisor = parseAdvisor(req);
-        console.log("[Telegram] Contact tap advisor:", { advisorQuery, advisor });
-        botToken = getTelegramBotToken(advisor);
-        chatId =
-          body.message.chat?.id != null ? String(body.message.chat.id) : undefined;
-        if (botToken && chatId) {
-          await sendTelegramMessage(botToken, chatId, CONTACT_TEAM_REPLY_MSG);
-        } else if (!botToken) {
-          console.error(
-            `[Telegram] No bot token for ${advisor}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`,
-          );
-        }
-        return;
-      }
-
+  try {
+    const body = req.body as { message?: { text?: string; chat?: { id?: number } } };
+    if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
       await ensureTelegramSchema();
-
       const advisorQuery = extractAdvisorQuery(req);
       const advisor = parseAdvisor(req);
-      console.log("[Telegram] Webhook advisor:", { advisorQuery, advisor });
+      console.log("[Telegram] Contact tap advisor:", { advisorQuery, advisor });
       botToken = getTelegramBotToken(advisor);
-      if (!botToken) {
+      chatId =
+        body.message.chat?.id != null ? String(body.message.chat.id) : undefined;
+      if (botToken && chatId) {
+        await sendTelegramMessage(botToken, chatId, CONTACT_TEAM_REPLY_MSG);
+      } else if (!botToken) {
         console.error(
           `[Telegram] No bot token for ${advisor}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`,
         );
-        return;
       }
-
-      const update = (req.body ?? {}) as TelegramUpdate;
-      chatId = extractChatId(update);
-      await processUpdate(update, advisor, advisorQuery, botToken);
-    } catch (err) {
-      console.error("[Telegram Webhook] Error: ", err);
-      if (botToken && chatId) {
-        try {
-          await sendLlmFailureReply(botToken, chatId);
-        } catch (sendErr) {
-          console.error("[Telegram Webhook] Error: ", sendErr);
-        }
-      }
-    } finally {
-      res.status(200).json({ ok: true });
+      return;
     }
-  });
+
+    await ensureTelegramSchema();
+
+    const advisorQuery = extractAdvisorQuery(req);
+    const advisor = parseAdvisor(req);
+    console.log("[Telegram] Webhook advisor:", { advisorQuery, advisor });
+    botToken = getTelegramBotToken(advisor);
+    if (!botToken) {
+      console.error(
+        `[Telegram] No bot token for ${advisor}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`,
+      );
+      return;
+    }
+
+    const update = (req.body ?? {}) as TelegramUpdate;
+    chatId = extractChatId(update);
+    await processUpdate(update, advisor, advisorQuery, botToken);
+  } catch (err) {
+    console.error("[Telegram Webhook] Error: ", err);
+    if (botToken && chatId) {
+      try {
+        await sendLlmFailureReply(botToken, chatId);
+      } catch (sendErr) {
+        console.error("[Telegram Webhook] Error: ", sendErr);
+      }
+    }
+  }
+}
+
+export function registerTelegramRoutes(app: Express): void {
+  const webhookHandler = (req: Request, res: Response): void => {
+    console.log("Received Telegram message:", req.body);
+
+    // Ack Telegram immediately — LLM processing continues in the background.
+    res.status(200).send("OK");
+
+    void processTelegramWebhook(req).catch((err) => {
+      console.error("[Telegram Webhook] Background processing error:", err);
+    });
+  };
+
+  app.post(TELEGRAM_WEBHOOK_PATH, webhookHandler);
+  app.post(`${TELEGRAM_WEBHOOK_PATH}/`, webhookHandler);
 }
 
 export function getTelegramBizBotUsername(): string {

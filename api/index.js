@@ -273,8 +273,8 @@ var init_schema = __esm({
       freeFounderCount: integer("freeFounderCount").default(5).notNull(),
       planTypeBiz: text("planTypeBiz", { enum: ["free", "starter", "pro"] }).notNull().default("free"),
       planTypeFounder: text("planTypeFounder", { enum: ["free", "starter", "pro"] }).notNull().default("free"),
-      bizMessageLimit: integer("bizMessageLimit").default(5).notNull(),
-      founderMessageLimit: integer("founderMessageLimit").default(5).notNull(),
+      bizMessageLimit: integer("bizMessageLimit").default(3).notNull(),
+      founderMessageLimit: integer("founderMessageLimit").default(3).notNull(),
       bizMessagesUsed: integer("bizMessagesUsed").default(0).notNull(),
       founderMessagesUsed: integer("founderMessagesUsed").default(0).notNull(),
       hasUsedBizStarter: text("hasUsedBizStarter", { enum: ["true", "false"] }).notNull().default("false"),
@@ -454,8 +454,8 @@ var init_schema_mysql = __esm({
       freeFounderCount: int("freeFounderCount").default(5).notNull(),
       planTypeBiz: mysqlEnum("planTypeBiz", ["free", "starter", "pro"]).notNull().default("free"),
       planTypeFounder: mysqlEnum("planTypeFounder", ["free", "starter", "pro"]).notNull().default("free"),
-      bizMessageLimit: int("bizMessageLimit").default(5).notNull(),
-      founderMessageLimit: int("founderMessageLimit").default(5).notNull(),
+      bizMessageLimit: int("bizMessageLimit").default(3).notNull(),
+      founderMessageLimit: int("founderMessageLimit").default(3).notNull(),
       bizMessagesUsed: int("bizMessagesUsed").default(0).notNull(),
       founderMessagesUsed: int("founderMessagesUsed").default(0).notNull(),
       hasUsedBizStarter: mysqlEnum("hasUsedBizStarter", ["true", "false"]).notNull().default("false"),
@@ -1358,7 +1358,7 @@ function planAppliesToAdvisor(planKey, advisor) {
 function isUnlimitedWebAdvisorUsage(advisor, row) {
   const tierPlan = advisor === "bizpilot" ? row.planTypeBiz : row.planTypeFounder;
   if (tierPlan === "pro") return true;
-  const limit = advisor === "bizpilot" ? row.bizMessageLimit ?? 5 : row.founderMessageLimit ?? 5;
+  const limit = advisor === "bizpilot" ? row.bizMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT : row.founderMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT;
   if (limit >= WEB_CHAT_UNLIMITED_LIMIT) return true;
   if (!planAppliesToAdvisor(row.plan, advisor)) return false;
   return isProTierPlan(row.plan);
@@ -1366,13 +1366,14 @@ function isUnlimitedWebAdvisorUsage(advisor, row) {
 function webMessageLimitForAdvisor(advisor, row) {
   if (isUnlimitedWebAdvisorUsage(advisor, row)) return WEB_CHAT_UNLIMITED_LIMIT;
   const tierPlan = advisor === "bizpilot" ? row.planTypeBiz : row.planTypeFounder;
-  const storedLimit = advisor === "bizpilot" ? row.bizMessageLimit ?? 5 : row.founderMessageLimit ?? 5;
+  const storedLimit = advisor === "bizpilot" ? row.bizMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT : row.founderMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT;
   if (planAppliesToAdvisor(row.plan, advisor)) {
     const tier = parsePlanKey(row.plan).tier;
     if (tier === "starter") return Math.max(storedLimit, WEB_CHAT_STARTER_LIMIT);
     if (tier === "pro") return WEB_CHAT_UNLIMITED_LIMIT;
   }
   if (tierPlan === "starter") return Math.max(storedLimit, WEB_CHAT_STARTER_LIMIT);
+  if (!tierPlan || tierPlan === "free") return WEB_CHAT_FREE_TRIAL_LIMIT;
   return storedLimit;
 }
 async function getMessageUsage(userId, advisor) {
@@ -1380,7 +1381,7 @@ async function getMessageUsage(userId, advisor) {
   if (!db) {
     return {
       used: 0,
-      limit: 5,
+      limit: WEB_CHAT_FREE_TRIAL_LIMIT,
       planType: "free",
       hasUsedStarter: false,
       hasPaidPlan: false
@@ -1402,7 +1403,7 @@ async function getMessageUsage(userId, advisor) {
   if (!row) {
     return {
       used: 0,
-      limit: 5,
+      limit: WEB_CHAT_FREE_TRIAL_LIMIT,
       planType: "free",
       hasUsedStarter: false,
       hasPaidPlan: false
@@ -2060,6 +2061,27 @@ function assertCanAssignTelegramStarter(user, advisor) {
     throw new Error(TELEGRAM_STARTER_ALREADY_USED_FOUNDER);
   }
 }
+function telegramAdvisorClearFields(advisor) {
+  if (advisor === "bizpilot") {
+    return {
+      bizMessageLimit: 0,
+      planTypeBiz: "free"
+    };
+  }
+  return {
+    founderMessageLimit: 0,
+    planTypeFounder: "free"
+  };
+}
+async function clearTelegramAdvisorPlan(userId, advisor) {
+  const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
+  await ensureTelegramSchema2();
+  const db = await assertDatabase();
+  await db.update(users3).set({
+    ...telegramAdvisorClearFields(advisor),
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(eq2(users3.id, userId));
+}
 async function applyTelegramAdvisorPlan(userId, advisor, tier, planExpiryDate) {
   const { ensureTelegramSchema: ensureTelegramSchema2 } = await Promise.resolve().then(() => (init_ensureTelegramSchema(), ensureTelegramSchema_exports));
   await ensureTelegramSchema2();
@@ -2101,6 +2123,17 @@ async function updateTelegramUserPlan(input) {
   const db = await assertDatabase();
   const user = await getUserById(input.userId);
   if (!user) throw new Error("User not found");
+  if (input.planType && input.planTier) {
+    const otherAdvisor = input.planType === "bizpilot" ? "founderpilot" : "bizpilot";
+    await clearTelegramAdvisorPlan(input.userId, otherAdvisor);
+    await applyTelegramAdvisorPlan(
+      input.userId,
+      input.planType,
+      input.planTier,
+      input.planExpiryDate
+    );
+    return;
+  }
   if (input.bizPlanTier) {
     await applyTelegramAdvisorPlan(
       input.userId,
@@ -2185,7 +2218,7 @@ async function decrementTelegramMessageLimit(userId, isBiz) {
     }).where(eq2(users3.id, userId));
   }
 }
-var WEB_CHAT_UNLIMITED_LIMIT, WEB_CHAT_STARTER_LIMIT, WEB_CHAT_STARTER_MEMORY_LIMIT, MAX_TELEGRAM_TURN_CHARS;
+var WEB_CHAT_UNLIMITED_LIMIT, WEB_CHAT_STARTER_LIMIT, WEB_CHAT_FREE_TRIAL_LIMIT, WEB_CHAT_STARTER_MEMORY_LIMIT, MAX_TELEGRAM_TURN_CHARS;
 var init_db = __esm({
   "server/db.ts"() {
     "use strict";
@@ -2198,6 +2231,7 @@ var init_db = __esm({
     init_connection();
     WEB_CHAT_UNLIMITED_LIMIT = 999999;
     WEB_CHAT_STARTER_LIMIT = 20;
+    WEB_CHAT_FREE_TRIAL_LIMIT = 3;
     WEB_CHAT_STARTER_MEMORY_LIMIT = 20;
     MAX_TELEGRAM_TURN_CHARS = 12e3;
   }
@@ -2810,7 +2844,7 @@ async function invokeLLM(params) {
     response_format
   } = params;
   const payload = {
-    model: "gemini-1.5-pro",
+    model: "gemini-2.5-pro",
     messages: messages4.map(normalizeMessage)
   };
   if (tools && tools.length > 0) {
@@ -2976,10 +3010,11 @@ function parseImagePayload(input) {
   }
   return { mimeType: "image/jpeg", base64: trimmed };
 }
-var VISION_GEMINI_MODELS;
+var LLM_USER_ERROR_MESSAGE, VISION_GEMINI_MODELS;
 var init_llmChat = __esm({
   "shared/llmChat.ts"() {
     "use strict";
+    LLM_USER_ERROR_MESSAGE = "pilothub ai model \u1019\u103B\u102C\u1038 \u1015\u103C\u103F\u1014\u102C \u1021\u1014\u100A\u103A\u1038\u1004\u101A\u103A\u101B\u103E\u102D\u1015\u102B\u101E\u100A\u103A\u104B \u1014\u1031\u102C\u1000\u103A\u1019\u103E \u1015\u103C\u1014\u103A\u101C\u100A\u103A\u1005\u1019\u103A\u1038\u101E\u1015\u103A\u1015\u102B\u104B";
     VISION_GEMINI_MODELS = [
       "gemini-1.5-pro",
       "gemini-1.5-flash",
@@ -2991,6 +3026,20 @@ var init_llmChat = __esm({
 });
 
 // server/llmWithApiKey.ts
+async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`LLM request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 function chatHasImages(msgs) {
   return msgs.some((m) => m.role !== "system" && Boolean(m.imageBase64?.trim()));
 }
@@ -3001,12 +3050,21 @@ function resolveGeminiModel(configured, hasImages) {
   return configured;
 }
 async function invokeAdvisorLLM(advisorSlug, messages4) {
+  try {
+    return await _invokeAdvisorLLMInner(advisorSlug, messages4);
+  } catch (err) {
+    console.error("[LLM] invokeAdvisorLLM Generation Error Details:", err);
+    throw err;
+  }
+}
+async function _invokeAdvisorLLMInner(advisorSlug, messages4) {
   const envOpenAiKey = resolveOpenAiApiKey();
   const aiModel = await getAiModel(advisorSlug);
   const configuredModel = aiModel?.modelString ?? DEFAULT_VISION_MODEL;
   const hasImages = chatHasImages(messages4);
   const modelString = resolveGeminiModel(configuredModel, hasImages);
   const isGeminiModel = modelString.startsWith("gemini");
+  console.log(`[LLM] advisor=${advisorSlug} model=${modelString} hasImages=${hasImages}`);
   const systemMsg = messages4.find((m) => m.role === "system");
   const systemPromptText = systemMsg?.content ?? "";
   const chatMessages = messages4.filter((m) => m.role !== "system").map((m) => ({
@@ -3019,6 +3077,7 @@ async function invokeAdvisorLLM(advisorSlug, messages4) {
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
       try {
+        console.log(`[LLM] Attempting Gemini primary model: ${modelString}`);
         return await invokeWithGemini({
           apiKey: geminiKey.keyValue,
           model: modelString,
@@ -3026,14 +3085,30 @@ async function invokeAdvisorLLM(advisorSlug, messages4) {
           chatMessages
         });
       } catch (err) {
-        console.warn("[LLM] Gemini key failed, falling back to built-in:", err);
+        console.error(`[LLM] Gemini primary model (${modelString}) failed:`, err);
       }
+      if (modelString !== FALLBACK_VISION_MODEL) {
+        try {
+          console.log(`[LLM] Attempting Gemini fallback model: ${FALLBACK_VISION_MODEL}`);
+          return await invokeWithGemini({
+            apiKey: geminiKey.keyValue,
+            model: FALLBACK_VISION_MODEL,
+            systemPrompt: systemPromptText,
+            chatMessages
+          });
+        } catch (err) {
+          console.error(`[LLM] Gemini fallback model (${FALLBACK_VISION_MODEL}) also failed:`, err);
+        }
+      }
+    } else {
+      console.warn("[LLM] No Gemini API key found in database for advisor:", advisorSlug);
     }
   } else {
     const openaiKey = await getActiveApiKey("openai");
     const openAiApiKey = openaiKey?.keyValue?.trim() || envOpenAiKey;
     if (openAiApiKey) {
       try {
+        console.log(`[LLM] Attempting OpenAI model: ${modelString}`);
         return await invokeWithOpenAI({
           apiKey: openAiApiKey,
           model: modelString,
@@ -3041,12 +3116,13 @@ async function invokeAdvisorLLM(advisorSlug, messages4) {
           chatMessages
         });
       } catch (err) {
-        console.warn("[LLM] OpenAI key failed, trying Gemini:", err);
+        console.error("[LLM] OpenAI key failed, trying Gemini:", err);
       }
     }
     const geminiKey = await getActiveApiKey("gemini");
     if (geminiKey?.keyValue) {
       try {
+        console.log(`[LLM] Attempting Gemini cross-fallback model: ${DEFAULT_VISION_MODEL}`);
         return await invokeWithGemini({
           apiKey: geminiKey.keyValue,
           model: resolveGeminiModel(DEFAULT_VISION_MODEL, hasImages),
@@ -3054,12 +3130,13 @@ async function invokeAdvisorLLM(advisorSlug, messages4) {
           chatMessages
         });
       } catch (err) {
-        console.warn("[LLM] Gemini fallback failed, using built-in:", err);
+        console.error("[LLM] Gemini cross-fallback also failed:", err);
       }
     }
   }
   if (envOpenAiKey && !isGeminiModel) {
     try {
+      console.log("[LLM] Attempting env OPENAI_API_KEY fallback");
       return await invokeWithOpenAI({
         apiKey: assertOpenAiApiKeyConfigured(),
         model: modelString,
@@ -3067,9 +3144,10 @@ async function invokeAdvisorLLM(advisorSlug, messages4) {
         chatMessages
       });
     } catch (err) {
-      console.warn("[LLM] Env OPENAI_API_KEY failed, falling back to built-in:", err);
+      console.error("[LLM] Env OPENAI_API_KEY fallback also failed:", err);
     }
   }
+  console.log("[LLM] All key-based paths exhausted, attempting platform built-in LLM");
   const fallbackMessages = messages4.map((m) => ({
     role: m.role,
     content: m.content
@@ -3101,7 +3179,7 @@ async function invokeWithOpenAI(params) {
       messages4.push({ role: msg.role, content: msg.content });
     }
   }
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -3166,7 +3244,7 @@ async function invokeWithGemini(params) {
       parts: [{ text: params.systemPrompt }]
     };
   }
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
@@ -3203,7 +3281,7 @@ ${msg.content}`;
   }
   return result;
 }
-var TEMPERATURE, MAX_OUTPUT_TOKENS, DEFAULT_VISION_MODEL;
+var TEMPERATURE, MAX_OUTPUT_TOKENS, DEFAULT_VISION_MODEL, FALLBACK_VISION_MODEL, FETCH_TIMEOUT_MS;
 var init_llmWithApiKey = __esm({
   "server/llmWithApiKey.ts"() {
     "use strict";
@@ -3213,7 +3291,9 @@ var init_llmWithApiKey = __esm({
     init_llmChat();
     TEMPERATURE = 0.3;
     MAX_OUTPUT_TOKENS = 4096;
-    DEFAULT_VISION_MODEL = "gemini-1.5-pro";
+    DEFAULT_VISION_MODEL = "gemini-2.5-pro";
+    FALLBACK_VISION_MODEL = "gemini-2.5-flash";
+    FETCH_TIMEOUT_MS = 55e3;
   }
 });
 
@@ -3350,6 +3430,7 @@ var init_telegramConfig = __esm({
 var telegram_exports = {};
 __export(telegram_exports, {
   TELEGRAM_BOT_USERNAME_PLACEHOLDER: () => TELEGRAM_BOT_USERNAME_PLACEHOLDER,
+  TELEGRAM_WEBHOOK_PATH: () => TELEGRAM_WEBHOOK_PATH,
   buildTelegramActivationLink: () => buildTelegramActivationLink,
   generateTelegramActivationToken: () => generateTelegramActivationToken,
   getTelegramBizBotUsername: () => getTelegramBizBotUsername,
@@ -3418,15 +3499,19 @@ function extractChatId(update) {
 async function sendTelegramMessage(botToken, chatId, text3) {
   try {
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: text3,
-        reply_markup: PERSISTENT_REPLY_KEYBOARD
-      })
-    });
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: text3,
+          reply_markup: PERSISTENT_REPLY_KEYBOARD
+        })
+      },
+      3e4
+    );
     if (!response.ok) {
       const body = await response.text();
       console.error("[Telegram] sendMessage failed:", response.status, body);
@@ -3441,11 +3526,15 @@ async function sendTelegramMessage(botToken, chatId, text3) {
 async function sendTypingChatAction(botToken, chatId) {
   try {
     const url = `https://api.telegram.org/bot${botToken}/sendChatAction`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, action: "typing" })
-    });
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, action: "typing" })
+      },
+      15e3
+    );
     if (!response.ok) {
       const body = await response.text();
       console.warn("[Telegram] sendChatAction typing failed:", response.status, body);
@@ -3469,109 +3558,126 @@ async function handleStartLink(chatId, token, botToken) {
   await markActivationTokenUsed(activation.id);
   await sendTelegramMessage(botToken, chatId, LINK_SUCCESS_MSG);
 }
-async function handleChatMessage(chatId, userText, advisorSlug, advisorQuery, botToken) {
-  const user = await safeGetUserByTelegramChatId(chatId);
-  if (!user) {
-    await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
-    return;
+async function sendLlmFailureReply(botToken, chatId) {
+  const sent = await sendTelegramMessage(botToken, chatId, LLM_USER_ERROR_MESSAGE);
+  if (!sent) {
+    console.error("[Telegram] Failed to deliver LLM error message to chat:", chatId);
   }
-  const isBiz = advisorSlug === "bizpilot";
-  const rawLimit = isBiz ? user.bizMessageLimit : user.founderMessageLimit;
-  const isUnlimited = isUnlimitedTelegramLimit(rawLimit);
-  const currentLimit = coerceTelegramMessageLimit(rawLimit);
-  const isExpired = !isTelegramPlanActive(user.planExpiryDate ?? null);
-  console.log("Credit check:", {
-    userId: user.id,
-    advisorQuery,
-    advisorSlug,
-    isBiz,
-    isUnlimited,
-    currentLimit,
-    bizMessageLimit: user.bizMessageLimit,
-    founderMessageLimit: user.founderMessageLimit,
-    expiry: user.planExpiryDate,
-    isExpired
-  });
-  if (isUnlimited) {
-    if (isExpired) {
-      console.log("[Telegram] Unlimited plan expired \u2014 denying access", {
+}
+async function handleChatMessage(chatId, userText, advisorSlug, advisorQuery, botToken) {
+  try {
+    const user = await safeGetUserByTelegramChatId(chatId);
+    if (!user) {
+      await sendTelegramMessage(botToken, chatId, NO_USER_FOUND_MSG);
+      return;
+    }
+    const isBiz = advisorSlug === "bizpilot";
+    const rawLimit = isBiz ? user.bizMessageLimit : user.founderMessageLimit;
+    const isUnlimited = isUnlimitedTelegramLimit(rawLimit);
+    const currentLimit = coerceTelegramMessageLimit(rawLimit);
+    const isExpired = !isTelegramPlanActive(user.planExpiryDate ?? null);
+    console.log("Credit check:", {
+      userId: user.id,
+      advisorQuery,
+      advisorSlug,
+      isBiz,
+      isUnlimited,
+      currentLimit,
+      bizMessageLimit: user.bizMessageLimit,
+      founderMessageLimit: user.founderMessageLimit,
+      expiry: user.planExpiryDate,
+      isExpired
+    });
+    if (isUnlimited) {
+      if (isExpired) {
+        console.log("[Telegram] Unlimited plan expired \u2014 denying access", {
+          userId: user.id,
+          chatId,
+          isBiz
+        });
+        await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
+        return;
+      }
+    } else if (currentLimit <= 0 || isExpired) {
+      console.log("[Telegram] Credit check failed \u2014 denying access", {
         userId: user.id,
-        chatId,
-        isBiz
+        advisorQuery,
+        advisorSlug,
+        currentLimit,
+        isExpired
       });
       await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
       return;
     }
-  } else if (currentLimit <= 0 || isExpired) {
-    console.log("[Telegram] Credit check failed \u2014 denying access", {
-      userId: user.id,
-      advisorQuery,
-      advisorSlug,
-      currentLimit,
-      isExpired
-    });
-    await sendTelegramMessage(botToken, chatId, NO_ACCESS_MSG);
-    return;
-  }
-  const systemPrompt = await getActiveSystemPrompt(advisorSlug);
-  const fallback = advisorSlug === "bizpilot" ? "You are BizPilot, an expert business advisor for Myanmar businesses." : "You are FounderPilot, a strategic advisor for founders and CEOs.";
-  const profileCtx = [
-    `
+    const systemPrompt = await getActiveSystemPrompt(advisorSlug);
+    const fallback = advisorSlug === "bizpilot" ? "You are BizPilot, an expert business advisor for Myanmar businesses." : "You are FounderPilot, a strategic advisor for founders and CEOs.";
+    const profileCtx = [
+      `
 
 [User Profile]`,
-    `- Name: ${user.name ?? "Unknown"}`,
-    user.businessName ? `- Business Name: ${user.businessName}` : null,
-    user.businessType ? `- Business Type: ${user.businessType}` : null,
-    user.useCase ? `- How they use PilotHub: ${user.useCase}` : null,
-    `- Channel: Telegram (${advisorSlug})`
-  ].filter(Boolean).join("\n");
-  const history = await listRecentTelegramLlmTurnsForAdvisor(user.id, advisorSlug, 40);
-  const llmMessages = [
-    {
-      role: "system",
-      content: appendAdvisorSafetyPrompt((systemPrompt || fallback) + profileCtx, advisorSlug)
-    },
-    ...history.map((h) => ({ role: h.role, content: h.content })),
-    { role: "user", content: userText }
-  ];
-  void sendTypingChatAction(botToken, chatId).catch(() => {
-  });
-  let reply;
-  try {
-    reply = await invokeAdvisorLLM(advisorSlug, llmMessages);
-  } catch (err) {
-    console.error("[Telegram] LLM error:", err);
-    await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
-    return;
-  }
-  const sent = await sendTelegramMessage(botToken, chatId, reply);
-  if (!sent) {
-    console.error("[Telegram] Gemini reply was not delivered; limit not decremented", {
-      userId: user.id,
-      advisorSlug
+      `- Name: ${user.name ?? "Unknown"}`,
+      user.businessName ? `- Business Name: ${user.businessName}` : null,
+      user.businessType ? `- Business Type: ${user.businessType}` : null,
+      user.useCase ? `- How they use PilotHub: ${user.useCase}` : null,
+      `- Channel: Telegram (${advisorSlug})`
+    ].filter(Boolean).join("\n");
+    const history = await listRecentTelegramLlmTurnsForAdvisor(user.id, advisorSlug, 40);
+    const llmMessages = [
+      {
+        role: "system",
+        content: appendAdvisorSafetyPrompt((systemPrompt || fallback) + profileCtx, advisorSlug)
+      },
+      ...history.map((h) => ({ role: h.role, content: h.content })),
+      { role: "user", content: userText }
+    ];
+    void sendTypingChatAction(botToken, chatId).catch(() => {
     });
-    return;
-  }
-  if (isUnlimited) {
-    console.log("[Telegram] Unlimited plan \u2014 skip limit decrement", { chatId, isBiz });
-  } else {
+    let reply;
     try {
-      await decrementTelegramMessageLimit(user.id, isBiz);
-      console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
+      reply = await invokeAdvisorLLM(advisorSlug, llmMessages);
     } catch (err) {
-      console.error("[Telegram] Failed to decrement message limit:", {
-        chatId,
-        userId: user.id,
-        isBiz,
-        advisorSlug,
-        err
-      });
+      console.error("[Telegram Webhook] Error: ", err);
+      await sendLlmFailureReply(botToken, chatId);
+      return;
     }
-  }
-  try {
-    await appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+    if (!reply?.trim()) {
+      console.error("[Telegram] LLM returned empty reply", { userId: user.id, advisorSlug });
+      await sendLlmFailureReply(botToken, chatId);
+      return;
+    }
+    const sent = await sendTelegramMessage(botToken, chatId, reply);
+    if (!sent) {
+      console.error("[Telegram] LLM reply was not delivered; limit not decremented", {
+        userId: user.id,
+        advisorSlug
+      });
+      await sendLlmFailureReply(botToken, chatId);
+      return;
+    }
+    if (isUnlimited) {
+      console.log("[Telegram] Unlimited plan \u2014 skip limit decrement", { chatId, isBiz });
+    } else {
+      try {
+        await decrementTelegramMessageLimit(user.id, isBiz);
+        console.log("Successfully decremented limit for chat:", chatId, "isBiz:", isBiz);
+      } catch (err) {
+        console.error("[Telegram] Failed to decrement message limit:", {
+          chatId,
+          userId: user.id,
+          isBiz,
+          advisorSlug,
+          err
+        });
+      }
+    }
+    try {
+      await appendTelegramLlmTurnPair(user.id, advisorSlug, userText, reply);
+    } catch (err) {
+      console.error("[Telegram] appendTelegramLlmTurnPair failed (reply already sent):", err);
+    }
   } catch (err) {
-    console.error("[Telegram] appendTelegramLlmTurnPair failed (reply already sent):", err);
+    console.error("[Telegram Webhook] Error: ", err);
+    await sendLlmFailureReply(botToken, chatId);
   }
 }
 async function safeGetUserByTelegramChatId(chatId) {
@@ -3613,56 +3719,62 @@ async function processUpdate(update, advisorSlug, advisorQuery, botToken) {
   }
   await handleChatMessage(chatId, text3, advisorSlug, advisorQuery, botToken);
 }
-function registerTelegramRoutes(app2) {
-  app2.post("/api/telegram/webhook", async (req, res) => {
-    console.log("Received Telegram message:", req.body);
-    let botToken;
-    let chatId;
-    try {
-      const body = req.body;
-      if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
-        await ensureTelegramSchema();
-        const advisorQuery2 = extractAdvisorQuery(req);
-        const advisor2 = parseAdvisor(req);
-        console.log("[Telegram] Contact tap advisor:", { advisorQuery: advisorQuery2, advisor: advisor2 });
-        botToken = getTelegramBotToken(advisor2);
-        chatId = body.message.chat?.id != null ? String(body.message.chat.id) : void 0;
-        if (botToken && chatId) {
-          await sendTelegramMessage(botToken, chatId, CONTACT_TEAM_REPLY_MSG);
-        } else if (!botToken) {
-          console.error(
-            `[Telegram] No bot token for ${advisor2}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`
-          );
-        }
-        return;
-      }
+async function processTelegramWebhook(req) {
+  let botToken;
+  let chatId;
+  try {
+    const body = req.body;
+    if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
       await ensureTelegramSchema();
-      const advisorQuery = extractAdvisorQuery(req);
-      const advisor = parseAdvisor(req);
-      console.log("[Telegram] Webhook advisor:", { advisorQuery, advisor });
-      botToken = getTelegramBotToken(advisor);
-      if (!botToken) {
-        console.error(
-          `[Telegram] No bot token for ${advisor}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`
-        );
-        return;
-      }
-      const update = req.body ?? {};
-      chatId = extractChatId(update);
-      await processUpdate(update, advisor, advisorQuery, botToken);
-    } catch (err) {
-      console.error("[Telegram] Webhook processing error:", err);
+      const advisorQuery2 = extractAdvisorQuery(req);
+      const advisor2 = parseAdvisor(req);
+      console.log("[Telegram] Contact tap advisor:", { advisorQuery: advisorQuery2, advisor: advisor2 });
+      botToken = getTelegramBotToken(advisor2);
+      chatId = body.message.chat?.id != null ? String(body.message.chat.id) : void 0;
       if (botToken && chatId) {
-        try {
-          await sendTelegramMessage(botToken, chatId, SYSTEM_ERROR_MSG);
-        } catch (sendErr) {
-          console.error("[Telegram] Failed to send error reply:", sendErr);
-        }
+        await sendTelegramMessage(botToken, chatId, CONTACT_TEAM_REPLY_MSG);
+      } else if (!botToken) {
+        console.error(
+          `[Telegram] No bot token for ${advisor2}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`
+        );
       }
-    } finally {
-      res.status(200).json({ ok: true });
+      return;
     }
-  });
+    await ensureTelegramSchema();
+    const advisorQuery = extractAdvisorQuery(req);
+    const advisor = parseAdvisor(req);
+    console.log("[Telegram] Webhook advisor:", { advisorQuery, advisor });
+    botToken = getTelegramBotToken(advisor);
+    if (!botToken) {
+      console.error(
+        `[Telegram] No bot token for ${advisor}. Set TELEGRAM_BIZPILOT_TOKEN or TELEGRAM_FOUNDERPILOT_TOKEN.`
+      );
+      return;
+    }
+    const update = req.body ?? {};
+    chatId = extractChatId(update);
+    await processUpdate(update, advisor, advisorQuery, botToken);
+  } catch (err) {
+    console.error("[Telegram Webhook] Error: ", err);
+    if (botToken && chatId) {
+      try {
+        await sendLlmFailureReply(botToken, chatId);
+      } catch (sendErr) {
+        console.error("[Telegram Webhook] Error: ", sendErr);
+      }
+    }
+  }
+}
+function registerTelegramRoutes(app2) {
+  const webhookHandler = (req, res) => {
+    console.log("Received Telegram message:", req.body);
+    res.status(200).send("OK");
+    void processTelegramWebhook(req).catch((err) => {
+      console.error("[Telegram Webhook] Background processing error:", err);
+    });
+  };
+  app2.post(TELEGRAM_WEBHOOK_PATH, webhookHandler);
+  app2.post(`${TELEGRAM_WEBHOOK_PATH}/`, webhookHandler);
 }
 function getTelegramBizBotUsername() {
   return resolveTelegramBizBotUsername(process.env);
@@ -3745,7 +3857,7 @@ async function generateTelegramActivationToken(userId, botUsername, planType = "
     deepLinkFounder: founderBot ? buildTelegramActivationLink(token, founderBot, "founderpilot") : null
   };
 }
-var NO_ACCESS_MSG, NO_USER_FOUND_MSG, LINK_SUCCESS_MSG, INVALID_TOKEN_MSG, SYSTEM_ERROR_MSG, ALREADY_LINKED_MSG, CONTACT_TEAM_BUTTON_TEXT, CONTACT_TEAM_REPLY_MSG, PERSISTENT_REPLY_KEYBOARD;
+var TELEGRAM_WEBHOOK_PATH, NO_ACCESS_MSG, NO_USER_FOUND_MSG, LINK_SUCCESS_MSG, INVALID_TOKEN_MSG, ALREADY_LINKED_MSG, CONTACT_TEAM_BUTTON_TEXT, CONTACT_TEAM_REPLY_MSG, PERSISTENT_REPLY_KEYBOARD;
 var init_telegram = __esm({
   "server/telegram.ts"() {
     "use strict";
@@ -3754,13 +3866,14 @@ var init_telegram = __esm({
     init_ensureTelegramSchema();
     init_llmWithApiKey();
     init_chatSafety();
+    init_llmChat();
     init_telegramConfig();
     init_telegramPlans();
+    TELEGRAM_WEBHOOK_PATH = "/api/telegram/webhook";
     NO_ACCESS_MSG = "\u101C\u1030\u1000\u103C\u102E\u1038\u1019\u1004\u103A\u1038\u104F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1001\u103D\u1004\u1037\u103A \u1000\u102F\u1014\u103A\u1006\u102F\u1036\u1038\u101E\u103D\u102C\u1038\u1015\u102B\u1015\u103C\u102E\u104B \u1011\u1015\u103A\u1019\u1036\u101D\u101A\u103A\u101A\u1030\u101B\u1014\u103A ChatPilot \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
     NO_USER_FOUND_MSG = "\u1012\u102E Bot \u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1016\u102D\u102F\u1037 Website \u1019\u103E\u102C \u1021\u101B\u1004\u103A Register \u101C\u102F\u1015\u103A\u1015\u1031\u1038\u1015\u102B \u101E\u102D\u102F\u1037\u1019\u101F\u102F\u1010\u103A ChatPilot Agency \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
     LINK_SUCCESS_MSG = "\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u1001\u103B\u102D\u1010\u103A\u1006\u1000\u103A\u1019\u103E\u102F \u1021\u1031\u102C\u1004\u103A\u1019\u103C\u1004\u103A\u1015\u102B\u101E\u100A\u103A\u104B \u1005\u1010\u1004\u103A\u1019\u1031\u1038\u1019\u103C\u1014\u103A\u1038\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B";
     INVALID_TOKEN_MSG = "\u1001\u103B\u102D\u1010\u103A\u1006\u1000\u103A\u1019\u103E\u102F\u1019\u1021\u1031\u102C\u1004\u103A\u1019\u103C\u1004\u103A\u1015\u102B\u104B Admin \u1011\u1036\u1019\u103E \u101B\u101B\u103E\u102D\u101E\u1031\u102C activation link \u1000\u102D\u102F \u1015\u103C\u1014\u103A\u1005\u1019\u103A\u1038\u1000\u103C\u100A\u1037\u103A\u1015\u102B\u104B";
-    SYSTEM_ERROR_MSG = "\u1005\u1014\u1005\u103A\u1001\u103B\u102D\u102F\u1037\u101A\u103D\u1004\u103A\u1038\u1014\u1031\u1015\u102B\u101E\u100A\u103A\u104B \u1001\u100F\u1014\u1031\u1019\u103E \u1011\u1015\u103A\u1019\u1036\u1000\u103C\u102D\u102F\u1038\u1005\u102C\u1038\u1000\u103C\u100A\u1037\u103A\u1015\u102B\u104B";
     ALREADY_LINKED_MSG = "\u1021\u1000\u1031\u102C\u1004\u1037\u103A \u1001\u103B\u102D\u1010\u103A\u1006\u1000\u103A\u1015\u103C\u102E\u1038\u101E\u102C\u1038\u1016\u103C\u1005\u103A\u1015\u102B\u101E\u100A\u103A\u104B \u1005\u102C\u101E\u102C\u1038\u1015\u102D\u102F\u1037\u1015\u103C\u102E\u1038 \u1019\u1031\u1038\u1019\u103C\u1014\u103A\u1038\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B";
     CONTACT_TEAM_BUTTON_TEXT = "\u{1F4DE} ChatPilot Team \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u101B\u1014\u103A";
     CONTACT_TEAM_REPLY_MSG = `\u1019\u100A\u103A\u101E\u100A\u1037\u103A\u1021\u1000\u103C\u1031\u102C\u1004\u103A\u1038\u1021\u101B\u102C\u1021\u1010\u103D\u1000\u103A \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u101C\u102D\u102F\u1015\u102B\u101E\u101C\u1032 \u1001\u1004\u103A\u1017\u103B\u102C? \u{1F447}
@@ -4175,7 +4288,13 @@ async function runAdvisorChatMutation(advisor, user, input) {
       imageBase64: imageDataUrl ?? void 0
     }
   ];
-  const assistantMessage = await invokeAdvisorLLM(advisor, llmMessages);
+  let assistantMessage;
+  try {
+    assistantMessage = await invokeAdvisorLLM(advisor, llmMessages);
+  } catch (err) {
+    console.error(`[AdvisorChat] LLM Generation Error Details for advisor=${advisor} userId=${user.id}:`, err);
+    throw err;
+  }
   await createMessage({ conversationId: conv.id, role: "assistant", content: assistantMessage });
   await touchConversation(conv.id);
   if (history.length <= 1) {
@@ -4548,6 +4667,7 @@ async function setUserSessionCookie(req, res, openId, name) {
 
 // server/routers.ts
 init_onboarding();
+init_llmChat();
 var COOKIE_NAME2 = "app_session_id";
 async function requireAdmin(ctx) {
   const hasAdminCookie = ctx.req.cookies?.admin_session === "authenticated";
@@ -4734,7 +4854,16 @@ var appRouter = router({
           })
         });
       }
-      return await runAdvisorChatMutation("bizpilot", user, input);
+      try {
+        return await runAdvisorChatMutation("bizpilot", user, input);
+      } catch (err) {
+        console.error("[Router] bizpilot mutation failed:", err);
+        if (err instanceof TRPCError3) throw err;
+        throw new TRPCError3({
+          code: "INTERNAL_SERVER_ERROR",
+          message: LLM_USER_ERROR_MESSAGE
+        });
+      }
     }),
     founderpilot: approvedProcedure.input(advisorChatInputSchema).mutation(async ({ ctx, input }) => {
       const user = ctx.user;
@@ -4752,7 +4881,16 @@ var appRouter = router({
           })
         });
       }
-      return await runAdvisorChatMutation("founderpilot", user, input);
+      try {
+        return await runAdvisorChatMutation("founderpilot", user, input);
+      } catch (err) {
+        console.error("[Router] founderpilot mutation failed:", err);
+        if (err instanceof TRPCError3) throw err;
+        throw new TRPCError3({
+          code: "INTERNAL_SERVER_ERROR",
+          message: LLM_USER_ERROR_MESSAGE
+        });
+      }
     })
   }),
   // ── Payment submission ──
@@ -5215,6 +5353,8 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
       updatePlan: publicProcedure.input(
         z3.object({
           userId: z3.number(),
+          planType: z3.enum(["bizpilot", "founderpilot"]).optional(),
+          planTier: z3.enum(["starter", "unlimited"]).optional(),
           bizPlanTier: z3.enum(["starter", "unlimited"]).optional(),
           founderPlanTier: z3.enum(["starter", "unlimited"]).optional(),
           bizMessageLimit: z3.number().int().min(0).optional(),
@@ -5226,6 +5366,11 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
       ).mutation(async ({ ctx, input }) => {
         await requireAdmin(ctx);
         try {
+          const hasExclusivePlan = input.planType != null && input.planTier != null;
+          const hasLegacyPlan = input.bizPlanTier != null || input.founderPlanTier != null;
+          if (hasExclusivePlan && hasLegacyPlan) {
+            throw new Error("Use either planType/planTier or bizPlanTier/founderPlanTier, not both");
+          }
           let parsedExpiry = void 0;
           if (input.planExpiryDate !== void 0) {
             if (input.planExpiryDate === null || input.planExpiryDate === "") {
@@ -5240,6 +5385,8 @@ Email not sent (no GMAIL credentials). Please send manually to ${payment.userEma
           }
           await updateTelegramUserPlan({
             userId: input.userId,
+            planType: input.planType,
+            planTier: input.planTier,
             bizPlanTier: input.bizPlanTier,
             founderPlanTier: input.founderPlanTier,
             bizMessageLimit: input.bizMessageLimit,
@@ -5672,8 +5819,25 @@ Ref: ${transactionRef ?? "N/A"}`
 
 // server/_core/app.ts
 init_telegram();
+function isTelegramWebhookPath(pathname) {
+  const normalized = pathname.replace(/\/+$/, "") || "/";
+  return normalized === TELEGRAM_WEBHOOK_PATH;
+}
+function allowTelegramWebhook(req, _res, next) {
+  const pathname = req.path || req.url?.split("?")[0] || "";
+  if (!isTelegramWebhookPath(pathname)) {
+    next();
+    return;
+  }
+  if (pathname.endsWith("/") && pathname.length > 1) {
+    const query = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
+  }
+  next();
+}
 function createApp(_options = {}) {
   const app2 = express();
+  app2.use(allowTelegramWebhook);
   app2.use(express.json({ limit: "50mb" }));
   app2.use(express.urlencoded({ limit: "50mb", extended: true }));
   app2.use(cookieParser());
