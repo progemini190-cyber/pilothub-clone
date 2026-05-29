@@ -156,8 +156,8 @@ var init_env = __esm({
       /** Comma-separated emails auto-promoted to admin on Google login (see adminAccess.ts). */
       adminEmail: process.env.ADMIN_EMAIL ?? "",
       /** Telegram bot tokens (BizPilot / FounderPilot paid channels). */
-      telegramBizBotToken: process.env.TELEGRAM_BIZPILOT_TOKEN ?? process.env.TELEGRAM_BIZ_BOT_TOKEN ?? process.env.TELEGRAM_BOT_TOKEN_BIZ ?? "",
-      telegramFounderBotToken: process.env.TELEGRAM_FOUNDERPILOT_TOKEN ?? process.env.TELEGRAM_FOUNDER_BOT_TOKEN ?? process.env.TELEGRAM_BOT_TOKEN_FOUNDER ?? "",
+      telegramBizBotToken: process.env.TELEGRAM_BOT_TOKEN_BIZ ?? process.env.TELEGRAM_BIZPILOT_TOKEN ?? process.env.TELEGRAM_BIZ_BOT_TOKEN ?? "",
+      telegramFounderBotToken: process.env.TELEGRAM_BOT_TOKEN_FOUNDER ?? process.env.TELEGRAM_FOUNDERPILOT_TOKEN ?? process.env.TELEGRAM_FOUNDER_BOT_TOKEN ?? "",
       /** BizPilot @username without @ — used in t.me activation links. */
       telegramBizBotUsername: process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? process.env.VITE_TELEGRAM_BOT_USERNAME ?? process.env.TELEGRAM_BIZPILOT_BOT_USERNAME ?? process.env.TELEGRAM_BIZ_BOT_USERNAME ?? process.env.TELEGRAM_BOT_USERNAME ?? ""
     };
@@ -3437,6 +3437,7 @@ __export(telegram_exports, {
   getTelegramBotToken: () => getTelegramBotToken,
   getTelegramFounderBotUsername: () => getTelegramFounderBotUsername,
   isFounderAdvisorQuery: () => isFounderAdvisorQuery,
+  parseAdvisorFromRequest: () => parseAdvisorFromRequest,
   registerTelegramRoutes: () => registerTelegramRoutes,
   resolveActivationBotUsername: () => resolveActivationBotUsername,
   resolveWebhookBaseUrl: () => resolveWebhookBaseUrl,
@@ -3448,67 +3449,24 @@ function isFounderAdvisorQuery(advisorQuery) {
 }
 function getTelegramBotToken(advisor) {
   if (advisor === "founderpilot" || isFounderAdvisorQuery(advisor)) {
-    return process.env.TELEGRAM_FOUNDERPILOT_TOKEN?.trim() || process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim() || process.env.TELEGRAM_BOT_TOKEN_FOUNDER?.trim();
+    return process.env.TELEGRAM_BOT_TOKEN_FOUNDER?.trim() || process.env.TELEGRAM_FOUNDERPILOT_TOKEN?.trim() || process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim();
   }
-  return process.env.TELEGRAM_BIZPILOT_TOKEN?.trim() || process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim() || process.env.TELEGRAM_BOT_TOKEN_BIZ?.trim();
+  return process.env.TELEGRAM_BOT_TOKEN_BIZ?.trim() || process.env.TELEGRAM_BIZPILOT_TOKEN?.trim() || process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim();
 }
-function normalizeAdvisorSlug(raw) {
-  if (isFounderAdvisorQuery(raw)) return "founderpilot";
+function parseAdvisorFromRequest(req) {
+  const raw = `${req.originalUrl ?? ""} ${req.url ?? ""}`.toLowerCase();
+  if (raw.includes("founder")) return "founderpilot";
+  if (raw.includes("bizpilot")) return "bizpilot";
   return "bizpilot";
 }
-function extractAdvisorSecretToken(req) {
-  const raw = req.headers["x-telegram-bot-api-secret-token"];
-  if (typeof raw === "string" && raw.trim()) return raw.trim();
-  if (Array.isArray(raw) && typeof raw[0] === "string" && raw[0].trim()) return raw[0].trim();
-  return void 0;
-}
-function advisorFromUrlString(pathWithQuery) {
-  try {
-    const absolute = pathWithQuery.startsWith("http://") || pathWithQuery.startsWith("https://") ? pathWithQuery : `http://internal${pathWithQuery.startsWith("/") ? "" : "/"}${pathWithQuery}`;
-    const advisorParam = new URL(absolute).searchParams.get("advisor");
-    if (advisorParam?.trim()) return advisorParam.trim();
-  } catch {
-  }
-  return void 0;
-}
 function extractAdvisorQuery(req) {
-  const secret = extractAdvisorSecretToken(req);
-  if (secret) return secret;
-  const urlCandidates = [
-    req.originalUrl,
-    req.url,
-    typeof req.headers["x-vercel-invocation-url"] === "string" ? req.headers["x-vercel-invocation-url"] : void 0,
-    typeof req.headers["x-forwarded-uri"] === "string" ? req.headers["x-forwarded-uri"] : void 0
-  ];
-  for (const pathWithQuery of urlCandidates) {
-    if (!pathWithQuery?.trim()) continue;
-    const advisor = advisorFromUrlString(pathWithQuery.trim());
-    if (advisor) return advisor;
-  }
+  const raw = `${req.originalUrl ?? ""} ${req.url ?? ""}`.toLowerCase();
+  if (raw.includes("founderpilot") || raw.includes("founder")) return "founderpilot";
+  if (raw.includes("bizpilot")) return "bizpilot";
   const q = req.query?.advisor;
   if (typeof q === "string" && q.trim()) return q.trim();
   if (Array.isArray(q) && typeof q[0] === "string" && q[0].trim()) return q[0].trim();
   return void 0;
-}
-function inferAdvisorFromUpdate(update) {
-  const text3 = update?.message?.text ?? "";
-  const match = text3.match(/@([\w_]+)/);
-  if (!match?.[1]) return void 0;
-  const mentioned = match[1].toLowerCase();
-  const founderBot = getTelegramFounderBotUsername()?.toLowerCase();
-  const bizBot = getTelegramBizBotUsername().toLowerCase();
-  if (founderBot && mentioned === founderBot) return "founderpilot";
-  if (bizBot && mentioned !== TELEGRAM_BOT_USERNAME_PLACEHOLDER.toLowerCase() && mentioned === bizBot) {
-    return "bizpilot";
-  }
-  return void 0;
-}
-function parseAdvisor(req, update) {
-  const fromQuery = extractAdvisorQuery(req);
-  if (fromQuery) return normalizeAdvisorSlug(fromQuery);
-  const inferred = inferAdvisorFromUpdate(update);
-  if (inferred) return inferred;
-  return "bizpilot";
 }
 function resolveActivationBotUsername(planType, botUsernameOverride) {
   return resolveTelegramActivationBotUsername(
@@ -3760,16 +3718,9 @@ async function processTelegramWebhook(req) {
   try {
     const update = req.body ?? {};
     const advisorQuery = extractAdvisorQuery(req);
-    const advisor = parseAdvisor(req, update);
+    const advisor = parseAdvisorFromRequest(req);
     botToken = getTelegramBotToken(advisor);
-    console.log(
-      "[Telegram Webhook] Advisor detected:",
-      advisorQuery ?? req.query?.advisor,
-      "Bot Token exists:",
-      !!botToken,
-      "Resolved advisor:",
-      advisor
-    );
+    console.log("[Telegram Webhook] Advisor:", advisor, "Token exists:", !!botToken);
     const body = req.body;
     if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
       await ensureTelegramSchema();
@@ -3805,7 +3756,14 @@ async function processTelegramWebhook(req) {
 }
 function registerTelegramRoutes(app2) {
   const webhookHandler = (req, res) => {
-    console.log("Received Telegram message:", req.body);
+    console.log(
+      "[CRITICAL] Webhook Hit! URL:",
+      req.url,
+      "Original:",
+      req.originalUrl,
+      "Query:",
+      req.query
+    );
     res.status(200).send("OK");
     void processTelegramWebhook(req).catch((err) => {
       console.error("[Telegram Webhook] Background processing error:", err);
@@ -3813,6 +3771,7 @@ function registerTelegramRoutes(app2) {
   };
   app2.post(TELEGRAM_WEBHOOK_PATH, webhookHandler);
   app2.post(`${TELEGRAM_WEBHOOK_PATH}/`, webhookHandler);
+  app2.post("/api", webhookHandler);
 }
 function getTelegramBizBotUsername() {
   return resolveTelegramBizBotUsername(process.env);
@@ -3871,12 +3830,7 @@ async function setupTelegramWebhook(advisor, baseUrl) {
   const response = await fetch(apiUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      url: webhookUrl,
-      drop_pending_updates: true,
-      /** Per-bot routing when query params are stripped by a proxy or rewrite. */
-      secret_token: advisor
-    })
+    body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true })
   });
   const data = await response.json();
   if (!response.ok || !data.ok) {
@@ -5866,31 +5820,16 @@ function isTelegramWebhookPath(pathname) {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   return normalized === TELEGRAM_WEBHOOK_PATH;
 }
-function isLikelyTelegramWebhookRequest(req) {
-  const pathname = req.path || req.url?.split("?")[0] || "";
-  if (isTelegramWebhookPath(pathname)) return true;
-  if (pathname !== "/api" && pathname !== "/api/index") return false;
-  if (req.method !== "POST") return false;
-  if (req.headers["x-telegram-bot-api-secret-token"]) return true;
-  const url = req.originalUrl ?? req.url ?? "";
-  if (url.includes("advisor=")) return true;
-  const q = req.query?.advisor;
-  if (typeof q === "string" && q.trim()) return true;
-  if (Array.isArray(q) && typeof q[0] === "string" && q[0].trim()) return true;
-  return false;
-}
 function allowTelegramWebhook(req, _res, next) {
-  let pathname = req.path || req.url?.split("?")[0] || "";
-  const query = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-  if (isLikelyTelegramWebhookRequest(req) && !isTelegramWebhookPath(pathname)) {
+  const pathname = req.path || req.url?.split("?")[0] || "";
+  const raw = `${req.originalUrl ?? ""} ${req.url ?? ""}`;
+  if (!isTelegramWebhookPath(pathname) && (raw.includes("telegram/webhook") || raw.includes("advisor="))) {
+    const query = req.originalUrl?.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
     req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
-    pathname = TELEGRAM_WEBHOOK_PATH;
   }
-  if (!isTelegramWebhookPath(pathname)) {
-    next();
-    return;
-  }
-  if (pathname.endsWith("/") && pathname.length > 1) {
+  const fixedPath = req.url?.split("?")[0] || "";
+  if (isTelegramWebhookPath(fixedPath) && fixedPath.endsWith("/") && fixedPath.length > 1) {
+    const query = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
     req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
   }
   next();
@@ -5916,42 +5855,10 @@ function createApp(_options = {}) {
 }
 
 // scripts/vercel-api-entry.ts
-init_telegram();
 var maxDuration = 60;
 var app = createApp({ apiOnly: true });
-function restoreVercelRequestUrl(req) {
-  const rawUrl = req.url ?? "/";
-  const pathname = rawUrl.split("?")[0] ?? "/";
-  if (pathname.includes(TELEGRAM_WEBHOOK_PATH)) return;
-  const headerCandidates = [
-    req.headers["x-forwarded-uri"],
-    req.headers["x-vercel-invocation-url"],
-    req.headers["x-invoke-path"]
-  ];
-  for (const candidate of headerCandidates) {
-    if (typeof candidate !== "string" || !candidate.trim()) continue;
-    const value = candidate.trim();
-    try {
-      const parsed = value.startsWith("http") ? new URL(value) : new URL(value, "http://internal");
-      if (parsed.pathname.includes(TELEGRAM_WEBHOOK_PATH) || parsed.searchParams.has("advisor")) {
-        req.url = `${parsed.pathname}${parsed.search}`;
-        return;
-      }
-    } catch {
-      if (value.includes(TELEGRAM_WEBHOOK_PATH) || value.includes("advisor=")) {
-        req.url = value.startsWith("/") ? value : `/${value}`;
-        return;
-      }
-    }
-  }
-  const query = rawUrl.includes("?") ? rawUrl.slice(rawUrl.indexOf("?")) : "";
-  if ((pathname === "/api" || pathname === "/api/index") && (query.includes("advisor=") || req.headers["x-telegram-bot-api-secret-token"])) {
-    req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
-  }
-}
 async function handler(req, res) {
   try {
-    restoreVercelRequestUrl(req);
     await new Promise((resolve, reject) => {
       app(req, res, (err) => {
         if (err) reject(err);

@@ -78,96 +78,34 @@ export function isFounderAdvisorQuery(advisorQuery: string | undefined): boolean
 export function getTelegramBotToken(advisor: AdvisorSlug | string | undefined): string | undefined {
   if (advisor === "founderpilot" || isFounderAdvisorQuery(advisor)) {
     return (
+      process.env.TELEGRAM_BOT_TOKEN_FOUNDER?.trim() ||
       process.env.TELEGRAM_FOUNDERPILOT_TOKEN?.trim() ||
-      process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim() ||
-      process.env.TELEGRAM_BOT_TOKEN_FOUNDER?.trim()
+      process.env.TELEGRAM_FOUNDER_BOT_TOKEN?.trim()
     );
   }
   return (
+    process.env.TELEGRAM_BOT_TOKEN_BIZ?.trim() ||
     process.env.TELEGRAM_BIZPILOT_TOKEN?.trim() ||
-    process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim() ||
-    process.env.TELEGRAM_BOT_TOKEN_BIZ?.trim()
+    process.env.TELEGRAM_BIZ_BOT_TOKEN?.trim()
   );
 }
 
-function normalizeAdvisorSlug(raw: string | undefined): AdvisorSlug {
-  if (isFounderAdvisorQuery(raw)) return "founderpilot";
+/** Dumb URL-string routing — no headers, no secret tokens. */
+export function parseAdvisorFromRequest(req: Request): AdvisorSlug {
+  const raw = `${req.originalUrl ?? ""} ${req.url ?? ""}`.toLowerCase();
+  if (raw.includes("founder")) return "founderpilot";
+  if (raw.includes("bizpilot")) return "bizpilot";
   return "bizpilot";
 }
 
-/** Telegram `setWebhook` secret_token — most reliable per-bot identifier. */
-function extractAdvisorSecretToken(req: Request): string | undefined {
-  const raw = req.headers["x-telegram-bot-api-secret-token"];
-  if (typeof raw === "string" && raw.trim()) return raw.trim();
-  if (Array.isArray(raw) && typeof raw[0] === "string" && raw[0].trim()) return raw[0].trim();
-  return undefined;
-}
-
-function advisorFromUrlString(pathWithQuery: string): string | undefined {
-  try {
-    const absolute =
-      pathWithQuery.startsWith("http://") || pathWithQuery.startsWith("https://")
-        ? pathWithQuery
-        : `http://internal${pathWithQuery.startsWith("/") ? "" : "/"}${pathWithQuery}`;
-    const advisorParam = new URL(absolute).searchParams.get("advisor");
-    if (advisorParam?.trim()) return advisorParam.trim();
-  } catch {
-    // fall through
-  }
-  return undefined;
-}
-
-/**
- * Resolve `advisor` query reliably (Vercel/Express sometimes omit parsed `req.query`).
- */
 function extractAdvisorQuery(req: Request): string | undefined {
-  const secret = extractAdvisorSecretToken(req);
-  if (secret) return secret;
-
-  const urlCandidates = [
-    req.originalUrl,
-    req.url,
-    typeof req.headers["x-vercel-invocation-url"] === "string"
-      ? req.headers["x-vercel-invocation-url"]
-      : undefined,
-    typeof req.headers["x-forwarded-uri"] === "string" ? req.headers["x-forwarded-uri"] : undefined,
-  ];
-
-  for (const pathWithQuery of urlCandidates) {
-    if (!pathWithQuery?.trim()) continue;
-    const advisor = advisorFromUrlString(pathWithQuery.trim());
-    if (advisor) return advisor;
-  }
-
+  const raw = `${req.originalUrl ?? ""} ${req.url ?? ""}`.toLowerCase();
+  if (raw.includes("founderpilot") || raw.includes("founder")) return "founderpilot";
+  if (raw.includes("bizpilot")) return "bizpilot";
   const q = req.query?.advisor;
   if (typeof q === "string" && q.trim()) return q.trim();
   if (Array.isArray(q) && typeof q[0] === "string" && q[0].trim()) return q[0].trim();
   return undefined;
-}
-
-/** Infer bot from `/command@BotUsername` suffix when query param is missing. */
-function inferAdvisorFromUpdate(update: TelegramUpdate | undefined): AdvisorSlug | undefined {
-  const text = update?.message?.text ?? "";
-  const match = text.match(/@([\w_]+)/);
-  if (!match?.[1]) return undefined;
-
-  const mentioned = match[1].toLowerCase();
-  const founderBot = getTelegramFounderBotUsername()?.toLowerCase();
-  const bizBot = getTelegramBizBotUsername().toLowerCase();
-
-  if (founderBot && mentioned === founderBot) return "founderpilot";
-  if (bizBot && mentioned !== TELEGRAM_BOT_USERNAME_PLACEHOLDER.toLowerCase() && mentioned === bizBot) {
-    return "bizpilot";
-  }
-  return undefined;
-}
-
-function parseAdvisor(req: Request, update?: TelegramUpdate): AdvisorSlug {
-  const fromQuery = extractAdvisorQuery(req);
-  if (fromQuery) return normalizeAdvisorSlug(fromQuery);
-  const inferred = inferAdvisorFromUpdate(update);
-  if (inferred) return inferred;
-  return "bizpilot";
 }
 
 export type TelegramActivationPlanType = "bizpilot" | "founderpilot";
@@ -488,17 +426,10 @@ async function processTelegramWebhook(req: Request): Promise<void> {
   try {
     const update = (req.body ?? {}) as TelegramUpdate;
     const advisorQuery = extractAdvisorQuery(req);
-    const advisor = parseAdvisor(req, update);
+    const advisor = parseAdvisorFromRequest(req);
     botToken = getTelegramBotToken(advisor);
 
-    console.log(
-      "[Telegram Webhook] Advisor detected:",
-      advisorQuery ?? req.query?.advisor,
-      "Bot Token exists:",
-      !!botToken,
-      "Resolved advisor:",
-      advisor,
-    );
+    console.log("[Telegram Webhook] Advisor:", advisor, "Token exists:", !!botToken);
 
     const body = req.body as { message?: { text?: string; chat?: { id?: number } } };
     if (body?.message?.text === CONTACT_TEAM_BUTTON_TEXT) {
@@ -540,9 +471,15 @@ async function processTelegramWebhook(req: Request): Promise<void> {
 
 export function registerTelegramRoutes(app: Express): void {
   const webhookHandler = (req: Request, res: Response): void => {
-    console.log("Received Telegram message:", req.body);
+    console.log(
+      "[CRITICAL] Webhook Hit! URL:",
+      req.url,
+      "Original:",
+      req.originalUrl,
+      "Query:",
+      req.query,
+    );
 
-    // Ack Telegram immediately — LLM processing continues in the background.
     res.status(200).send("OK");
 
     void processTelegramWebhook(req).catch((err) => {
@@ -552,6 +489,8 @@ export function registerTelegramRoutes(app: Express): void {
 
   app.post(TELEGRAM_WEBHOOK_PATH, webhookHandler);
   app.post(`${TELEGRAM_WEBHOOK_PATH}/`, webhookHandler);
+  /** Failsafe when Vercel catch-all rewrite strips path to `/api`. */
+  app.post("/api", webhookHandler);
 }
 
 export function getTelegramBizBotUsername(): string {
@@ -631,12 +570,7 @@ export async function setupTelegramWebhook(
   const response = await fetch(apiUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      url: webhookUrl,
-      drop_pending_updates: true,
-      /** Per-bot routing when query params are stripped by a proxy or rewrite. */
-      secret_token: advisor,
-    }),
+    body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
   });
 
   const data = (await response.json()) as {

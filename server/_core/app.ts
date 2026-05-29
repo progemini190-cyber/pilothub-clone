@@ -26,42 +26,26 @@ function isTelegramWebhookPath(pathname: string): boolean {
 }
 
 /** Telegram webhooks must bypass auth — unauthenticated POSTs must never redirect. */
-function isLikelyTelegramWebhookRequest(req: Request): boolean {
-  const pathname = req.path || req.url?.split("?")[0] || "";
-  if (isTelegramWebhookPath(pathname)) return true;
-
-  // Vercel catch-all rewrite `/api/*` → `/api` strips the path but keeps query/body.
-  if (pathname !== "/api" && pathname !== "/api/index") return false;
-  if (req.method !== "POST") return false;
-
-  if (req.headers["x-telegram-bot-api-secret-token"]) return true;
-
-  const url = req.originalUrl ?? req.url ?? "";
-  if (url.includes("advisor=")) return true;
-
-  const q = req.query?.advisor;
-  if (typeof q === "string" && q.trim()) return true;
-  if (Array.isArray(q) && typeof q[0] === "string" && q[0].trim()) return true;
-
-  return false;
-}
-
 function allowTelegramWebhook(req: Request, _res: Response, next: NextFunction): void {
-  let pathname = req.path || req.url?.split("?")[0] || "";
-  const query = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+  const pathname = req.path || req.url?.split("?")[0] || "";
+  const raw = `${req.originalUrl ?? ""} ${req.url ?? ""}`;
 
-  if (isLikelyTelegramWebhookRequest(req) && !isTelegramWebhookPath(pathname)) {
-    req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
-    pathname = TELEGRAM_WEBHOOK_PATH;
-  }
-
-  if (!isTelegramWebhookPath(pathname)) {
-    next();
-    return;
-  }
-  if (pathname.endsWith("/") && pathname.length > 1) {
+  if (!isTelegramWebhookPath(pathname) && (raw.includes("telegram/webhook") || raw.includes("advisor="))) {
+    const query =
+      req.originalUrl?.includes("?")
+        ? req.originalUrl.slice(req.originalUrl.indexOf("?"))
+        : req.url?.includes("?")
+          ? req.url.slice(req.url.indexOf("?"))
+          : "";
     req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
   }
+
+  const fixedPath = req.url?.split("?")[0] || "";
+  if (isTelegramWebhookPath(fixedPath) && fixedPath.endsWith("/") && fixedPath.length > 1) {
+    const query = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
+  }
+
   next();
 }
 

@@ -10,6 +10,7 @@ import {
   getTelegramBizBotUsername,
   getTelegramBotToken,
   isFounderAdvisorQuery,
+  parseAdvisorFromRequest,
 } from "./telegram";
 import {
   resolveTelegramActivationBotUsername,
@@ -164,5 +165,20 @@ describe("telegram webhook token routing", () => {
     process.env.TELEGRAM_BOT_TOKEN_FOUNDER = "alias-founder";
     expect(getTelegramBotToken("bizpilot")).toBe("alias-biz");
     expect(getTelegramBotToken("founderpilot")).toBe("alias-founder");
+  });
+
+  it("parseAdvisorFromRequest uses simple URL substring matching", () => {
+    const bizReq = {
+      originalUrl: "/api/telegram/webhook?advisor=bizpilot",
+      url: "/api/telegram/webhook?advisor=bizpilot",
+      query: { advisor: "bizpilot" },
+    } as import("express").Request;
+    const founderReq = {
+      originalUrl: "/api/telegram/webhook?advisor=founderpilot",
+      url: "/api?advisor=founderpilot",
+      query: {},
+    } as import("express").Request;
+    expect(parseAdvisorFromRequest(bizReq)).toBe("bizpilot");
+    expect(parseAdvisorFromRequest(founderReq)).toBe("founderpilot");
   });
 });

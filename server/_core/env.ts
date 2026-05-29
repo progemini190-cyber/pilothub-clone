@@ -32,14 +32,14 @@ export const ENV = {
 
   /** Telegram bot tokens (BizPilot / FounderPilot paid channels). */
   telegramBizBotToken:
+    process.env.TELEGRAM_BOT_TOKEN_BIZ ??
     process.env.TELEGRAM_BIZPILOT_TOKEN ??
     process.env.TELEGRAM_BIZ_BOT_TOKEN ??
-    process.env.TELEGRAM_BOT_TOKEN_BIZ ??
     "",
   telegramFounderBotToken:
+    process.env.TELEGRAM_BOT_TOKEN_FOUNDER ??
     process.env.TELEGRAM_FOUNDERPILOT_TOKEN ??
     process.env.TELEGRAM_FOUNDER_BOT_TOKEN ??
-    process.env.TELEGRAM_BOT_TOKEN_FOUNDER ??
     "",
 
   /** BizPilot @username without @ — used in t.me activation links. */
