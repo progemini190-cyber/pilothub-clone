@@ -57,8 +57,15 @@ function toDateInputValue(value: Date | string | null | undefined) {
   return d.toISOString().slice(0, 10);
 }
 
+type TelegramPlanAdvisor = "bizpilot" | "founderpilot";
+
+type SelectedTelegramPlan = {
+  advisor: TelegramPlanAdvisor;
+  tier: TelegramPlanTier;
+};
+
 /** Pick bot for activation link from user plan columns and message limits. */
-function inferActivationPlanType(u: TelegramUser): "bizpilot" | "founderpilot" {
+function inferActivationPlanType(u: TelegramUser): TelegramPlanAdvisor {
   const founderActive =
     u.planTypeFounder !== "free" || u.founderMessageLimit > 0;
   const bizActive = u.planTypeBiz !== "free" || u.bizMessageLimit > 0;
@@ -68,12 +75,42 @@ function inferActivationPlanType(u: TelegramUser): "bizpilot" | "founderpilot" {
   return "bizpilot";
 }
 
+function inferSelectedTelegramPlan(u: TelegramUser): SelectedTelegramPlan {
+  const founderActive =
+    u.planTypeFounder !== "free" || u.founderMessageLimit > 0;
+  const bizActive = u.planTypeBiz !== "free" || u.bizMessageLimit > 0;
+  if (founderActive && !bizActive) {
+    return {
+      advisor: "founderpilot",
+      tier: inferTelegramPlanTierFromLimit(u.founderMessageLimit),
+    };
+  }
+  if (bizActive && !founderActive) {
+    return {
+      advisor: "bizpilot",
+      tier: inferTelegramPlanTierFromLimit(u.bizMessageLimit),
+    };
+  }
+  if (u.founderMessageLimit > u.bizMessageLimit) {
+    return {
+      advisor: "founderpilot",
+      tier: inferTelegramPlanTierFromLimit(u.founderMessageLimit),
+    };
+  }
+  return {
+    advisor: "bizpilot",
+    tier: inferTelegramPlanTierFromLimit(u.bizMessageLimit),
+  };
+}
+
 export default function AdminTelegramBots() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [manageUser, setManageUser] = useState<TelegramUser | null>(null);
-  const [manageBizTier, setManageBizTier] = useState<TelegramPlanTier>("starter");
-  const [manageFounderTier, setManageFounderTier] = useState<TelegramPlanTier>("starter");
+  const [selectedPlan, setSelectedPlan] = useState<SelectedTelegramPlan>({
+    advisor: "bizpilot",
+    tier: "starter",
+  });
   const [expiryDate, setExpiryDate] = useState("");
   const [linkModal, setLinkModal] = useState<{ user: TelegramUser; link: string; token: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -218,8 +255,7 @@ export default function AdminTelegramBots() {
 
   const openManageModal = (user: TelegramUser) => {
     setManageUser(user);
-    setManageBizTier(inferTelegramPlanTierFromLimit(user.bizMessageLimit));
-    setManageFounderTier(inferTelegramPlanTierFromLimit(user.founderMessageLimit));
+    setSelectedPlan(inferSelectedTelegramPlan(user));
     setExpiryDate(toDateInputValue(user.planExpiryDate) || toDateInputValue(addMonths(new Date(), 1)));
   };
 
@@ -228,8 +264,8 @@ export default function AdminTelegramBots() {
 
     updatePlan.mutate({
       userId: manageUser.id,
-      bizPlanTier: manageBizTier,
-      founderPlanTier: manageFounderTier,
+      planType: selectedPlan.advisor,
+      planTier: selectedPlan.tier,
       planExpiryDate: expiryDate || null,
     });
   };
@@ -258,12 +294,11 @@ export default function AdminTelegramBots() {
     }
   };
 
-  const handleManageTierChange = (
-    side: "biz" | "founder",
+  const handleManagePlanSelect = (
+    advisor: TelegramPlanAdvisor,
     tier: TelegramPlanTier,
   ) => {
-    if (side === "biz") setManageBizTier(tier);
-    else setManageFounderTier(tier);
+    setSelectedPlan({ advisor, tier });
     if (tier === "unlimited") {
       setExpiryDate(toDateInputValue(addTelegramPlanMonths()));
     }
@@ -287,14 +322,20 @@ export default function AdminTelegramBots() {
     name,
     value,
     onChange,
+    advisor,
+    selectedPlan: sharedSelectedPlan,
+    onSelect,
     starterUsed,
     starterUsedMessage,
     checkedBg,
     checkedBorder,
   }: {
     name: string;
-    value: TelegramPlanTier;
-    onChange: (tier: TelegramPlanTier) => void;
+    value?: TelegramPlanTier;
+    onChange?: (tier: TelegramPlanTier) => void;
+    advisor?: TelegramPlanAdvisor;
+    selectedPlan?: SelectedTelegramPlan;
+    onSelect?: (advisor: TelegramPlanAdvisor, tier: TelegramPlanTier) => void;
     starterUsed: boolean;
     starterUsedMessage: string;
     checkedBg: string;
@@ -308,7 +349,9 @@ export default function AdminTelegramBots() {
         ] as const
       ).map((opt) => {
         const disabled = opt.tier === "starter" && starterUsed;
-        const checked = value === opt.tier;
+        const checked = sharedSelectedPlan && advisor
+          ? sharedSelectedPlan.advisor === advisor && sharedSelectedPlan.tier === opt.tier
+          : value === opt.tier;
         return (
           <label
             key={`${name}-${opt.tier}`}
@@ -324,10 +367,16 @@ export default function AdminTelegramBots() {
             <input
               type="radio"
               name={name}
-              value={opt.tier}
+              value={advisor ? `${advisor}:${opt.tier}` : opt.tier}
               checked={checked}
               disabled={disabled}
-              onChange={() => onChange(opt.tier)}
+              onChange={() => {
+                if (advisor && onSelect) {
+                  onSelect(advisor, opt.tier);
+                } else if (onChange) {
+                  onChange(opt.tier);
+                }
+              }}
               className="mt-1"
             />
             <span>
@@ -734,14 +783,18 @@ export default function AdminTelegramBots() {
             </div>
 
             <div className="space-y-4">
+              <p className="text-xs" style={{ color: "oklch(55% 0.03 220)" }}>
+                Select one plan only — BizPilot and FounderPilot plans are mutually exclusive.
+              </p>
               <div>
                 <label className="block text-xs font-semibold mb-2" style={{ color: "oklch(65% 0.22 250)" }}>
                   BizPilot plan tier
                 </label>
                 <PlanTierOptions
-                  name="manage-biz-tier"
-                  value={manageBizTier}
-                  onChange={(tier) => handleManageTierChange("biz", tier)}
+                  name="manage-telegram-plan"
+                  advisor="bizpilot"
+                  selectedPlan={selectedPlan}
+                  onSelect={handleManagePlanSelect}
                   starterUsed={manageUser.hasUsedBizStarter}
                   starterUsedMessage={TELEGRAM_STARTER_ALREADY_USED_BIZ}
                   checkedBg="oklch(65% 0.22 250 / 0.12)"
@@ -754,9 +807,10 @@ export default function AdminTelegramBots() {
                   FounderPilot plan tier
                 </label>
                 <PlanTierOptions
-                  name="manage-founder-tier"
-                  value={manageFounderTier}
-                  onChange={(tier) => handleManageTierChange("founder", tier)}
+                  name="manage-telegram-plan"
+                  advisor="founderpilot"
+                  selectedPlan={selectedPlan}
+                  onSelect={handleManagePlanSelect}
                   starterUsed={manageUser.hasUsedFounderStarter}
                   starterUsedMessage={TELEGRAM_STARTER_ALREADY_USED_FOUNDER}
                   checkedBg="oklch(78% 0.12 75 / 0.12)"

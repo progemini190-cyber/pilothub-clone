@@ -1368,6 +1368,36 @@ function assertCanAssignTelegramStarter(
   }
 }
 
+/** Reset one advisor's Telegram plan columns to free / no plan. */
+function telegramAdvisorClearFields(advisor: AdvisorSlug): Record<string, unknown> {
+  if (advisor === "bizpilot") {
+    return {
+      bizMessageLimit: 0,
+      planTypeBiz: "free",
+    };
+  }
+  return {
+    founderMessageLimit: 0,
+    planTypeFounder: "free",
+  };
+}
+
+export async function clearTelegramAdvisorPlan(
+  userId: number,
+  advisor: AdvisorSlug,
+): Promise<void> {
+  const { ensureTelegramSchema } = await import("./db/ensureTelegramSchema");
+  await ensureTelegramSchema();
+  const db = await assertDatabase();
+  await db
+    .update(users)
+    .set({
+      ...telegramAdvisorClearFields(advisor),
+      updatedAt: new Date(),
+    } as Record<string, unknown>)
+    .where(eq(users.id, userId));
+}
+
 /**
  * Apply Starter (20 msgs, one-time) or Unlimited (999999, +1 month expiry) for one advisor.
  */
@@ -1422,6 +1452,9 @@ export async function applyTelegramAdvisorPlan(
 
 export async function updateTelegramUserPlan(input: {
   userId: number;
+  /** Mutually exclusive: apply this advisor tier and clear the other bot's plan. */
+  planType?: AdvisorSlug;
+  planTier?: TelegramPlanTier;
   bizPlanTier?: TelegramPlanTier;
   founderPlanTier?: TelegramPlanTier;
   bizMessageLimit?: number;
@@ -1435,6 +1468,19 @@ export async function updateTelegramUserPlan(input: {
   const db = await assertDatabase();
   const user = await getUserById(input.userId);
   if (!user) throw new Error("User not found");
+
+  if (input.planType && input.planTier) {
+    const otherAdvisor: AdvisorSlug =
+      input.planType === "bizpilot" ? "founderpilot" : "bizpilot";
+    await clearTelegramAdvisorPlan(input.userId, otherAdvisor);
+    await applyTelegramAdvisorPlan(
+      input.userId,
+      input.planType,
+      input.planTier,
+      input.planExpiryDate,
+    );
+    return;
+  }
 
   if (input.bizPlanTier) {
     await applyTelegramAdvisorPlan(

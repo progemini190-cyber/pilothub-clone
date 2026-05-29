@@ -828,6 +828,8 @@ export const appRouter = router({
         .input(
           z.object({
             userId: z.number(),
+            planType: z.enum(["bizpilot", "founderpilot"]).optional(),
+            planTier: z.enum(["starter", "unlimited"]).optional(),
             bizPlanTier: z.enum(["starter", "unlimited"]).optional(),
             founderPlanTier: z.enum(["starter", "unlimited"]).optional(),
             bizMessageLimit: z.number().int().min(0).optional(),
@@ -840,6 +842,12 @@ export const appRouter = router({
         .mutation(async ({ ctx, input }) => {
           await requireAdmin(ctx);
           try {
+            const hasExclusivePlan = input.planType != null && input.planTier != null;
+            const hasLegacyPlan = input.bizPlanTier != null || input.founderPlanTier != null;
+            if (hasExclusivePlan && hasLegacyPlan) {
+              throw new Error("Use either planType/planTier or bizPlanTier/founderPlanTier, not both");
+            }
+
             let parsedExpiry: Date | null | undefined = undefined;
             if (input.planExpiryDate !== undefined) {
               if (input.planExpiryDate === null || input.planExpiryDate === "") {
@@ -856,6 +864,8 @@ export const appRouter = router({
             }
             await db.updateTelegramUserPlan({
               userId: input.userId,
+              planType: input.planType,
+              planTier: input.planTier,
               bizPlanTier: input.bizPlanTier,
               founderPlanTier: input.founderPlanTier,
               bizMessageLimit: input.bizMessageLimit,
