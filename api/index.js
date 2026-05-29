@@ -3430,7 +3430,6 @@ var init_telegramConfig = __esm({
 var telegram_exports = {};
 __export(telegram_exports, {
   TELEGRAM_BOT_USERNAME_PLACEHOLDER: () => TELEGRAM_BOT_USERNAME_PLACEHOLDER,
-  TELEGRAM_WEBHOOK_PATH: () => TELEGRAM_WEBHOOK_PATH,
   buildTelegramActivationLink: () => buildTelegramActivationLink,
   generateTelegramActivationToken: () => generateTelegramActivationToken,
   getTelegramBizBotUsername: () => getTelegramBizBotUsername,
@@ -3769,8 +3768,8 @@ function registerTelegramRoutes(app2) {
       console.error("[Telegram Webhook] Background processing error:", err);
     });
   };
-  app2.post(TELEGRAM_WEBHOOK_PATH, webhookHandler);
-  app2.post(`${TELEGRAM_WEBHOOK_PATH}/`, webhookHandler);
+  app2.post("/api/telegram/webhook", webhookHandler);
+  app2.post("/api/telegram/webhook/", webhookHandler);
   app2.post("/api", webhookHandler);
 }
 function getTelegramBizBotUsername() {
@@ -3854,7 +3853,7 @@ async function generateTelegramActivationToken(userId, botUsername, planType = "
     deepLinkFounder: founderBot ? buildTelegramActivationLink(token, founderBot, "founderpilot") : null
   };
 }
-var TELEGRAM_WEBHOOK_PATH, NO_ACCESS_MSG, NO_USER_FOUND_MSG, LINK_SUCCESS_MSG, INVALID_TOKEN_MSG, ALREADY_LINKED_MSG, CONTACT_TEAM_BUTTON_TEXT, CONTACT_TEAM_REPLY_MSG, PERSISTENT_REPLY_KEYBOARD;
+var NO_ACCESS_MSG, NO_USER_FOUND_MSG, LINK_SUCCESS_MSG, INVALID_TOKEN_MSG, ALREADY_LINKED_MSG, CONTACT_TEAM_BUTTON_TEXT, CONTACT_TEAM_REPLY_MSG, PERSISTENT_REPLY_KEYBOARD;
 var init_telegram = __esm({
   "server/telegram.ts"() {
     "use strict";
@@ -3866,7 +3865,6 @@ var init_telegram = __esm({
     init_llmChat();
     init_telegramConfig();
     init_telegramPlans();
-    TELEGRAM_WEBHOOK_PATH = "/api/telegram/webhook";
     NO_ACCESS_MSG = "\u101C\u1030\u1000\u103C\u102E\u1038\u1019\u1004\u103A\u1038\u104F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1001\u103D\u1004\u1037\u103A \u1000\u102F\u1014\u103A\u1006\u102F\u1036\u1038\u101E\u103D\u102C\u1038\u1015\u102B\u1015\u103C\u102E\u104B \u1011\u1015\u103A\u1019\u1036\u101D\u101A\u103A\u101A\u1030\u101B\u1014\u103A ChatPilot \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
     NO_USER_FOUND_MSG = "\u1012\u102E Bot \u1000\u102D\u102F \u1021\u101E\u102F\u1036\u1038\u1015\u103C\u102F\u1016\u102D\u102F\u1037 Website \u1019\u103E\u102C \u1021\u101B\u1004\u103A Register \u101C\u102F\u1015\u103A\u1015\u1031\u1038\u1015\u102B \u101E\u102D\u102F\u1037\u1019\u101F\u102F\u1010\u103A ChatPilot Agency \u101E\u102D\u102F\u1037 \u1006\u1000\u103A\u101E\u103D\u101A\u103A\u1015\u102B\u104B";
     LINK_SUCCESS_MSG = "\u1021\u1000\u1031\u102C\u1004\u1037\u103A\u1001\u103B\u102D\u1010\u103A\u1006\u1000\u103A\u1019\u103E\u102F \u1021\u1031\u102C\u1004\u103A\u1019\u103C\u1004\u103A\u1015\u102B\u101E\u100A\u103A\u104B \u1005\u1010\u1004\u103A\u1019\u1031\u1038\u1019\u103C\u1014\u103A\u1038\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1015\u103C\u102E\u104B";
@@ -5818,19 +5816,19 @@ Ref: ${transactionRef ?? "N/A"}`
 init_telegram();
 function isTelegramWebhookPath(pathname) {
   const normalized = pathname.replace(/\/+$/, "") || "/";
-  return normalized === TELEGRAM_WEBHOOK_PATH;
+  return normalized === "/api/telegram/webhook";
 }
 function allowTelegramWebhook(req, _res, next) {
   const pathname = req.path || req.url?.split("?")[0] || "";
   const raw = `${req.originalUrl ?? ""} ${req.url ?? ""}`;
   if (!isTelegramWebhookPath(pathname) && (raw.includes("telegram/webhook") || raw.includes("advisor="))) {
     const query = req.originalUrl?.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-    req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
+    req.url = `/api/telegram/webhook${query}`;
   }
   const fixedPath = req.url?.split("?")[0] || "";
   if (isTelegramWebhookPath(fixedPath) && fixedPath.endsWith("/") && fixedPath.length > 1) {
     const query = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-    req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
+    req.url = `/api/telegram/webhook${query}`;
   }
   next();
 }

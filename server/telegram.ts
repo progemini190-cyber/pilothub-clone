@@ -4,9 +4,6 @@
  * (defaults to bizpilot when omitted)
  */
 
-/** Public webhook path — excluded from auth middleware (see middleware.ts). */
-export const TELEGRAM_WEBHOOK_PATH = "/api/telegram/webhook";
-
 import type { Express, Request, Response } from "express";
 import { getPublicOrigin } from "./_core/oauth";
 import { nanoid } from "nanoid";
@@ -487,8 +484,8 @@ export function registerTelegramRoutes(app: Express): void {
     });
   };
 
-  app.post(TELEGRAM_WEBHOOK_PATH, webhookHandler);
-  app.post(`${TELEGRAM_WEBHOOK_PATH}/`, webhookHandler);
+  app.post("/api/telegram/webhook", webhookHandler);
+  app.post("/api/telegram/webhook/", webhookHandler);
   /** Failsafe when Vercel catch-all rewrite strips path to `/api`. */
   app.post("/api", webhookHandler);
 }

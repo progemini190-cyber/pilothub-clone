@@ -4,18 +4,16 @@
  * Telegram webhooks POST without a user session. Any auth redirect here (or in
  * downstream middleware) returns 307 and Telegram drops the payload.
  */
-export const TELEGRAM_WEBHOOK_PATH = "/api/telegram/webhook";
-
 export const config = {
-  matcher: [TELEGRAM_WEBHOOK_PATH, `${TELEGRAM_WEBHOOK_PATH}/`],
+  matcher: ["/api/telegram/webhook", "/api/telegram/webhook/"],
 };
 
 export default function middleware(request: Request): Response | undefined {
   const url = new URL(request.url);
 
   // Rewrite trailing-slash variant internally — never 307-redirect POST bodies.
-  if (url.pathname === `${TELEGRAM_WEBHOOK_PATH}/`) {
-    url.pathname = TELEGRAM_WEBHOOK_PATH;
+  if (url.pathname === "/api/telegram/webhook/") {
+    url.pathname = "/api/telegram/webhook";
     return Response.rewrite(url);
   }
 

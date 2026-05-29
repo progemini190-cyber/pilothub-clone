@@ -6,7 +6,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { registerPublicApiRoutes } from "../publicApi";
-import { registerTelegramRoutes, TELEGRAM_WEBHOOK_PATH } from "../telegram";
+import { registerTelegramRoutes } from "../telegram";
 
 export type CreateAppOptions = {
   /**
@@ -22,7 +22,7 @@ export type CreateAppOptions = {
  */
 function isTelegramWebhookPath(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, "") || "/";
-  return normalized === TELEGRAM_WEBHOOK_PATH;
+  return normalized === "/api/telegram/webhook";
 }
 
 /** Telegram webhooks must bypass auth — unauthenticated POSTs must never redirect. */
@@ -37,13 +37,13 @@ function allowTelegramWebhook(req: Request, _res: Response, next: NextFunction):
         : req.url?.includes("?")
           ? req.url.slice(req.url.indexOf("?"))
           : "";
-    req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
+    req.url = `/api/telegram/webhook${query}`;
   }
 
   const fixedPath = req.url?.split("?")[0] || "";
   if (isTelegramWebhookPath(fixedPath) && fixedPath.endsWith("/") && fixedPath.length > 1) {
     const query = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-    req.url = `${TELEGRAM_WEBHOOK_PATH}${query}`;
+    req.url = `/api/telegram/webhook${query}`;
   }
 
   next();
