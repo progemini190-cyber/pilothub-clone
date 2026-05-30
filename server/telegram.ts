@@ -5,6 +5,7 @@
  */
 
 import type { Express, Request, Response } from "express";
+import { waitUntil } from "@vercel/functions";
 import { getPublicOrigin } from "./_core/oauth";
 import { nanoid } from "nanoid";
 import * as db from "./db";
@@ -477,11 +478,13 @@ export function registerTelegramRoutes(app: Express): void {
       req.query,
     );
 
-    res.status(200).send("OK");
+    waitUntil(
+      processTelegramWebhook(req).catch((err) => {
+        console.error("[Telegram Webhook] Background processing error:", err);
+      }),
+    );
 
-    void processTelegramWebhook(req).catch((err) => {
-      console.error("[Telegram Webhook] Background processing error:", err);
-    });
+    res.status(200).send("OK");
   };
 
   app.post("/api/telegram/webhook", webhookHandler);

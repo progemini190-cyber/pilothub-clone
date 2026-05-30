@@ -3442,6 +3442,7 @@ __export(telegram_exports, {
   resolveWebhookBaseUrl: () => resolveWebhookBaseUrl,
   setupTelegramWebhook: () => setupTelegramWebhook
 });
+import { waitUntil } from "@vercel/functions";
 import { nanoid } from "nanoid";
 function isFounderAdvisorQuery(advisorQuery) {
   return (advisorQuery ?? "").toLowerCase().includes("founder");
@@ -3763,10 +3764,12 @@ function registerTelegramRoutes(app2) {
       "Query:",
       req.query
     );
+    waitUntil(
+      processTelegramWebhook(req).catch((err) => {
+        console.error("[Telegram Webhook] Background processing error:", err);
+      })
+    );
     res.status(200).send("OK");
-    void processTelegramWebhook(req).catch((err) => {
-      console.error("[Telegram Webhook] Background processing error:", err);
-    });
   };
   app2.post("/api/telegram/webhook", webhookHandler);
   app2.post("/api/telegram/webhook/", webhookHandler);
