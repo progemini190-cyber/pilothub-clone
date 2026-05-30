@@ -3623,29 +3623,34 @@ async function handleChatMessage(chatId, userText, advisorSlug, advisorQuery, bo
       ...history.map((h) => ({ role: h.role, content: h.content })),
       { role: "user", content: userText }
     ];
-    void sendTypingChatAction(botToken, chatId).catch(() => {
-    });
+    await sendTypingChatAction(botToken, chatId);
+    const typingInterval = setInterval(() => {
+      void sendTypingChatAction(botToken, chatId).catch(() => {
+      });
+    }, 4e3);
     let reply;
     try {
       reply = await invokeAdvisorLLM(advisorSlug, llmMessages);
+      if (!reply?.trim()) {
+        console.error("[Telegram] LLM returned empty reply", { userId: user.id, advisorSlug });
+        await sendLlmFailureReply(botToken, chatId);
+        return;
+      }
+      const sent = await sendTelegramMessage(botToken, chatId, reply);
+      if (!sent) {
+        console.error("[Telegram] LLM reply was not delivered; limit not decremented", {
+          userId: user.id,
+          advisorSlug
+        });
+        await sendLlmFailureReply(botToken, chatId);
+        return;
+      }
     } catch (err) {
       console.error("[Telegram Webhook] Error: ", err);
       await sendLlmFailureReply(botToken, chatId);
       return;
-    }
-    if (!reply?.trim()) {
-      console.error("[Telegram] LLM returned empty reply", { userId: user.id, advisorSlug });
-      await sendLlmFailureReply(botToken, chatId);
-      return;
-    }
-    const sent = await sendTelegramMessage(botToken, chatId, reply);
-    if (!sent) {
-      console.error("[Telegram] LLM reply was not delivered; limit not decremented", {
-        userId: user.id,
-        advisorSlug
-      });
-      await sendLlmFailureReply(botToken, chatId);
-      return;
+    } finally {
+      clearInterval(typingInterval);
     }
     if (isUnlimited) {
       console.log("[Telegram] Unlimited plan \u2014 skip limit decrement", { chatId, isBiz });
