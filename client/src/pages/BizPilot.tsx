@@ -287,7 +287,7 @@ export default function BizPilot() {
             <p className="text-xs sm:text-sm mb-4 sm:mb-5" style={{ color: "oklch(65% 0.03 220)" }}>
               {hasPaidPlan
                 ? "Your plan message limit has been reached. Upgrade for more messages."
-                : "BizPilot free trial (3 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် BizPilot plan ဝယ်ယူပါ။"}
+                : "BizPilot free trial (2 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် BizPilot plan ဝယ်ယူပါ။"}
             </p>
             <button onClick={() => { setShowLimitModal(false); setLocation("/app/billing"); }}
               className="w-full py-2 sm:py-3 rounded-xl font-semibold text-xs sm:text-sm mb-2"

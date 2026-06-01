@@ -23,7 +23,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [dismissedIds, setDismissedIds] = useState<number[]>([]);
 
-  const freeCountsQuery = trpc.ai.freeCounts.useQuery(undefined, { enabled: !!user });
+  const usageQuery = trpc.ai.messageUsage.useQuery(undefined, { enabled: !!user });
   const bizConvsQuery = trpc.ai.conversations.list.useQuery({ modelSlug: "bizpilot" }, { enabled: !!user });
   const founderConvsQuery = trpc.ai.conversations.list.useQuery({ modelSlug: "founderpilot" }, { enabled: !!user });
   const announcementsQuery = trpc.announcements.list.useQuery();
@@ -31,8 +31,13 @@ export default function Dashboard() {
   const totalConversations = (bizConvsQuery.data?.conversations?.length ?? 0) + (founderConvsQuery.data?.conversations?.length ?? 0);
   const currentPlan = user?.plan ?? "free";
   const memberSince = user ? new Date().toLocaleDateString() : "—";
-  const freeBizLeft = freeCountsQuery.data?.freeBizCount ?? 10;
-  const freeFounderLeft = freeCountsQuery.data?.freeFounderCount ?? 5;
+  // Real per-advisor usage. Free-trial caps: BizPilot = 2, FounderPilot = 0 (no free trial).
+  const bizUsage = usageQuery.data?.biz;
+  const founderUsage = usageQuery.data?.founder;
+  const bizLimit = bizUsage?.limit ?? 2;
+  const founderLimit = founderUsage?.limit ?? 0;
+  const freeBizLeft = Math.max(0, bizLimit - (bizUsage?.used ?? 0));
+  const freeFounderLeft = Math.max(0, founderLimit - (founderUsage?.used ?? 0));
   const isFree = !user?.plan || user.plan === "free";
 
   const activeAnnouncements = (announcementsQuery.data?.announcements ?? []).filter(
@@ -136,8 +141,8 @@ export default function Dashboard() {
         ))}
       </ul>
       {isFree && (
-        <p className="text-xs mb-3" style={{ color: freeFounderLeft <= 2 ? "oklch(75% 0.2 30)" : "oklch(75% 0.18 55)" }}>
-          {freeFounderLeft} free messages remaining
+        <p className="text-xs mb-3" style={{ color: "oklch(75% 0.2 30)" }}>
+          {founderLimit === 0 ? "Paid plan required — no free trial" : `${freeFounderLeft} free messages remaining`}
         </p>
       )}
       <button className="w-full py-2.5 rounded-xl text-sm font-semibold transition"
@@ -187,8 +192,10 @@ export default function Dashboard() {
           </p>
           {isFree && (
             <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs">
-              <span style={{ color: "oklch(65% 0.2 220)" }}>BizPilot: {freeBizLeft}/10 free messages</span>
-              <span style={{ color: "oklch(75% 0.18 55)" }}>FounderPilot: {freeFounderLeft}/5 free messages</span>
+              <span style={{ color: "oklch(65% 0.2 220)" }}>BizPilot: {freeBizLeft}/{bizLimit} free messages</span>
+              <span style={{ color: "oklch(75% 0.18 55)" }}>
+                {founderLimit === 0 ? "FounderPilot: Paid plan required" : `FounderPilot: ${freeFounderLeft}/${founderLimit} free messages`}
+              </span>
             </div>
           )}
         </div>

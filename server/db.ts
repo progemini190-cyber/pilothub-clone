@@ -215,7 +215,20 @@ export async function linkUserToGoogleOpenId(
 
 export const WEB_CHAT_UNLIMITED_LIMIT = 999999;
 export const WEB_CHAT_STARTER_LIMIT = 20;
-export const WEB_CHAT_FREE_TRIAL_LIMIT = 3;
+
+// ── Free-trial caps (cost-cutting) ──
+// BizPilot: 2 free messages. FounderPilot: 0 — no free trial (immediate paywall).
+export const WEB_CHAT_FREE_TRIAL_LIMIT_BIZ = 2;
+export const WEB_CHAT_FREE_TRIAL_LIMIT_FOUNDER = 0;
+/** @deprecated Generic fallback for callers without advisor context; use webFreeTrialLimit(). */
+export const WEB_CHAT_FREE_TRIAL_LIMIT = WEB_CHAT_FREE_TRIAL_LIMIT_BIZ;
+
+/** Per-advisor free-trial message cap. */
+export function webFreeTrialLimit(advisor: "bizpilot" | "founderpilot"): number {
+  return advisor === "bizpilot"
+    ? WEB_CHAT_FREE_TRIAL_LIMIT_BIZ
+    : WEB_CHAT_FREE_TRIAL_LIMIT_FOUNDER;
+}
 
 function planAppliesToAdvisor(
   planKey: string | null | undefined,
@@ -241,8 +254,8 @@ function isUnlimitedWebAdvisorUsage(
   if (tierPlan === "pro") return true;
   const limit =
     advisor === "bizpilot"
-      ? row.bizMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT
-      : row.founderMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT;
+      ? row.bizMessageLimit ?? webFreeTrialLimit(advisor)
+      : row.founderMessageLimit ?? webFreeTrialLimit(advisor);
   if (limit >= WEB_CHAT_UNLIMITED_LIMIT) return true;
   if (!planAppliesToAdvisor(row.plan, advisor)) return false;
   return isProTierPlan(row.plan);
@@ -263,15 +276,15 @@ function webMessageLimitForAdvisor(
   const tierPlan = advisor === "bizpilot" ? row.planTypeBiz : row.planTypeFounder;
   const storedLimit =
     advisor === "bizpilot"
-      ? row.bizMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT
-      : row.founderMessageLimit ?? WEB_CHAT_FREE_TRIAL_LIMIT;
+      ? row.bizMessageLimit ?? webFreeTrialLimit(advisor)
+      : row.founderMessageLimit ?? webFreeTrialLimit(advisor);
   if (planAppliesToAdvisor(row.plan, advisor)) {
     const tier = parsePlanKey(row.plan).tier;
     if (tier === "starter") return Math.max(storedLimit, WEB_CHAT_STARTER_LIMIT);
     if (tier === "pro") return WEB_CHAT_UNLIMITED_LIMIT;
   }
   if (tierPlan === "starter") return Math.max(storedLimit, WEB_CHAT_STARTER_LIMIT);
-  if (!tierPlan || tierPlan === "free") return WEB_CHAT_FREE_TRIAL_LIMIT;
+  if (!tierPlan || tierPlan === "free") return webFreeTrialLimit(advisor);
   return storedLimit;
 }
 
@@ -284,7 +297,7 @@ export async function getMessageUsage(userId: number, advisor: "bizpilot" | "fou
   if (!db) {
     return {
       used: 0,
-      limit: WEB_CHAT_FREE_TRIAL_LIMIT,
+      limit: webFreeTrialLimit(advisor),
       planType: "free" as const,
       hasUsedStarter: false,
       hasPaidPlan: false,
@@ -306,7 +319,7 @@ export async function getMessageUsage(userId: number, advisor: "bizpilot" | "fou
   if (!row) {
     return {
       used: 0,
-      limit: WEB_CHAT_FREE_TRIAL_LIMIT,
+      limit: webFreeTrialLimit(advisor),
       planType: "free" as const,
       hasUsedStarter: false,
       hasPaidPlan: false,
@@ -497,6 +510,104 @@ export async function createMessage(input: {
     })
     .returning();
   return row;
+}
+
+// ── Structured JSON chat history (lean LLM context window) ──
+
+/** Max recent turns kept in the conversation JSON snapshot / sent to the LLM. */
+export const WEB_CHAT_CONTEXT_WINDOW = 20;
+
+/** A lean chat message object — the exact shape passed to the LLM as JSON. */
+export type LeanChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  imageData?: string | null;
+};
+
+/** Strictly parse the stored JSON snapshot into a clean array of message objects. */
+export function parseConversationHistoryJson(raw: unknown): LeanChatMessage[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter(
+      (m): m is LeanChatMessage =>
+        !!m &&
+        typeof m === "object" &&
+        ((m as LeanChatMessage).role === "user" ||
+          (m as LeanChatMessage).role === "assistant") &&
+        typeof (m as LeanChatMessage).content === "string",
+    )
+    .map((m) => ({
+      role: m.role,
+      content: m.content,
+      imageData: m.imageData ?? null,
+    }));
+}
+
+/** Persist the lean history array as a JSON string (capped to the context window). */
+async function writeConversationHistoryJson(
+  conversationId: number,
+  history: LeanChatMessage[],
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const capped = history.slice(-WEB_CHAT_CONTEXT_WINDOW);
+  await db
+    .update(conversations)
+    .set({ messagesJson: JSON.stringify(capped) } as Record<string, unknown>)
+    .where(eq(conversations.id, conversationId));
+}
+
+/**
+ * Lean JSON history for the LLM context window.
+ * Prefers the structured `messagesJson` snapshot; for legacy conversations it
+ * reconstructs the array from the `messages` rows and backfills the snapshot.
+ */
+export async function getConversationHistoryForLlm(
+  conversationId: number,
+): Promise<LeanChatMessage[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const convRows = await db
+    .select({ messagesJson: conversations.messagesJson })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .limit(1);
+
+  const snapshot = parseConversationHistoryJson(convRows[0]?.messagesJson);
+  if (snapshot.length > 0) return snapshot;
+
+  // Legacy fallback: rebuild lean array from individual message rows.
+  const rows = await listConversationMessages(conversationId);
+  const lean: LeanChatMessage[] = rows
+    .filter((r: { role: string }) => r.role === "user" || r.role === "assistant")
+    .map((r: { role: string; content: string; imageData?: string | null }) => ({
+      role: r.role as "user" | "assistant",
+      content: r.content,
+      imageData: r.imageData ?? null,
+    }));
+
+  if (lean.length > 0) {
+    await writeConversationHistoryJson(conversationId, lean);
+  }
+  return lean;
+}
+
+/** Append new turns to the conversation's lean JSON snapshot. */
+export async function appendConversationHistoryJson(
+  conversationId: number,
+  turns: LeanChatMessage[],
+): Promise<void> {
+  if (turns.length === 0) return;
+  const existing = await getConversationHistoryForLlm(conversationId);
+  await writeConversationHistoryJson(conversationId, [...existing, ...turns]);
 }
 
 /** Starter plan: first N stored messages in the latest conversation. */

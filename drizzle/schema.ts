@@ -20,8 +20,9 @@ export const users = sqliteTable("users", {
   freeFounderCount: integer("freeFounderCount").default(5).notNull(),
   planTypeBiz: text("planTypeBiz", { enum: ["free", "starter", "pro"] }).notNull().default("free"),
   planTypeFounder: text("planTypeFounder", { enum: ["free", "starter", "pro"] }).notNull().default("free"),
-  bizMessageLimit: integer("bizMessageLimit").default(3).notNull(),
-  founderMessageLimit: integer("founderMessageLimit").default(3).notNull(),
+  // Free-trial caps (cost-cutting): BizPilot = 2 messages, FounderPilot = 0 (immediate paywall).
+  bizMessageLimit: integer("bizMessageLimit").default(2).notNull(),
+  founderMessageLimit: integer("founderMessageLimit").default(0).notNull(),
   bizMessagesUsed: integer("bizMessagesUsed").default(0).notNull(),
   founderMessagesUsed: integer("founderMessagesUsed").default(0).notNull(),
   hasUsedBizStarter: text("hasUsedBizStarter", { enum: ["true", "false"] }).notNull().default("false"),
@@ -47,6 +48,12 @@ export const conversations = sqliteTable("conversations", {
   modelSlug: text("modelSlug", { length: 64 }).notNull(),
   title: text("title"),
   summary: text("summary"),
+  /**
+   * Structured JSON snapshot of the lean LLM context window:
+   * a JSON-stringified array of `{ role, content, imageData? }` objects.
+   * Replaces concatenated-text memory to cut token bloat and improve precision.
+   */
+  messagesJson: text("messagesJson"),
   createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
     .notNull()

@@ -62,8 +62,10 @@ export async function ensureChatSchema(): Promise<void> {
   const provider = getDatabaseProvider();
   if (provider === "mysql") {
     await runStatement("ALTER TABLE `messages` ADD COLUMN `imageData` text NULL");
+    await runStatement("ALTER TABLE `conversations` ADD COLUMN `messagesJson` text NULL");
   } else {
     await runStatement("ALTER TABLE `messages` ADD COLUMN `imageData` text");
+    await runStatement("ALTER TABLE `conversations` ADD COLUMN `messagesJson` text");
   }
   _ready = true;
 }

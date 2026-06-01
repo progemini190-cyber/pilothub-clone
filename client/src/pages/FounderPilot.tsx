@@ -160,8 +160,8 @@ export default function FounderPilot() {
                   <div className="p-4 rounded-xl text-center max-w-sm"
                     style={{ background: "oklch(60% 0.2 30 / 0.1)", border: "1px solid oklch(60% 0.2 30 / 0.3)" }}>
                     <Lock className="w-6 h-6 mx-auto mb-2" style={{ color: "oklch(75% 0.2 30)" }} />
-                    <p className="text-sm font-semibold text-white mb-1">Free Trial ကုန်ပါပြီ</p>
-                    <p className="text-xs mb-3" style={{ color: "oklch(65% 0.03 220)" }}>FounderPilot plan ဝယ်ယူပြီး ဆက်မေးနိုင်ပါသည်</p>
+                    <p className="text-sm font-semibold text-white mb-1">FounderPilot Plan လိုအပ်ပါသည်</p>
+                    <p className="text-xs mb-3" style={{ color: "oklch(65% 0.03 220)" }}>FounderPilot သည် paid plan သီးသန့်ဖြစ်ပါသည်။ Plan ဝယ်ယူပြီး စတင်မေးမြန်းနိုင်ပါသည်</p>
                     <button onClick={() => setLocation("/app/billing")}
                       className="px-4 py-2 rounded-lg text-xs font-semibold"
                       style={{ background: "oklch(72% 0.18 162)", color: "oklch(12% 0.03 220)" }}>
@@ -231,7 +231,7 @@ export default function FounderPilot() {
                 style={{ background: "oklch(60% 0.2 30 / 0.08)", border: "1px solid oklch(60% 0.2 30 / 0.25)" }}>
                 <div className="flex items-center gap-2">
                   <Lock className="w-4 h-4 flex-shrink-0" style={{ color: "oklch(75% 0.2 30)" }} />
-                  <span className="text-xs sm:text-sm text-white">{hasPaidPlan ? "Message limit reached" : "Free trial ကုန်ပါပြီ"}</span>
+                  <span className="text-xs sm:text-sm text-white">{hasPaidPlan ? "Message limit reached" : "FounderPilot Plan လိုအပ်ပါသည်"}</span>
                 </div>
                 <button onClick={() => setLocation("/app/billing")}
                   className="w-full sm:w-auto px-3 sm:px-4 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0"
@@ -268,12 +268,12 @@ export default function FounderPilot() {
               <Lock className="w-6 sm:w-7 h-6 sm:h-7" style={{ color: "oklch(75% 0.2 30)" }} />
             </div>
             <h3 className="text-base sm:text-lg font-bold text-white mb-2" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-              {hasPaidPlan ? "Message Limit Reached" : "Free Trial ကုန်ပါပြီ"}
+              {hasPaidPlan ? "Message Limit Reached" : "FounderPilot Plan လိုအပ်ပါသည်"}
             </h3>
             <p className="text-xs sm:text-sm mb-4 sm:mb-5" style={{ color: "oklch(65% 0.03 220)" }}>
               {hasPaidPlan
                 ? "Your plan message limit has been reached. Upgrade for more messages."
-                : "FounderPilot free trial (3 messages) ကုန်ပါပြီ။ ဆက်မေးနိုင်ရန် FounderPilot plan ဝယ်ယူပါ။"}
+                : "FounderPilot သည် paid plan သီးသန့်ဖြစ်ပါသည် (free trial မရှိပါ)။ ဆက်မေးနိုင်ရန် FounderPilot plan ဝယ်ယူပါ။"}
             </p>
             <button onClick={() => { setShowLimitModal(false); setLocation("/app/billing"); }}
               className="w-full py-2 sm:py-3 rounded-xl font-semibold text-xs sm:text-sm mb-2"

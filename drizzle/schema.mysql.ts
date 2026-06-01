@@ -30,8 +30,9 @@ export const users = mysqlTable("users", {
   freeFounderCount: int("freeFounderCount").default(5).notNull(),
   planTypeBiz: mysqlEnum("planTypeBiz", ["free", "starter", "pro"]).notNull().default("free"),
   planTypeFounder: mysqlEnum("planTypeFounder", ["free", "starter", "pro"]).notNull().default("free"),
-  bizMessageLimit: int("bizMessageLimit").default(3).notNull(),
-  founderMessageLimit: int("founderMessageLimit").default(3).notNull(),
+  // Free-trial caps (cost-cutting): BizPilot = 2 messages, FounderPilot = 0 (immediate paywall).
+  bizMessageLimit: int("bizMessageLimit").default(2).notNull(),
+  founderMessageLimit: int("founderMessageLimit").default(0).notNull(),
   bizMessagesUsed: int("bizMessagesUsed").default(0).notNull(),
   founderMessagesUsed: int("founderMessagesUsed").default(0).notNull(),
   hasUsedBizStarter: mysqlEnum("hasUsedBizStarter", ["true", "false"]).notNull().default("false"),
@@ -122,6 +123,8 @@ export const conversations = mysqlTable("conversations", {
   modelSlug: varchar("modelSlug", { length: 64 }).notNull(),
   title: text("title"),
   summary: text("summary"),
+  /** JSON-stringified array of lean `{ role, content, imageData? }` LLM context messages. */
+  messagesJson: text("messagesJson"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
 });

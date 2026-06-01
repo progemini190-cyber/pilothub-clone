@@ -43,15 +43,16 @@ export async function runAdvisorChatMutation(
     conversationId: input.conversationId,
   });
 
+  // Lean JSON history snapshot BEFORE this turn (structured message objects, no
+  // concatenated text). This is the exact context window handed to the LLM.
+  const priorHistory = await db.getConversationHistoryForLlm(conv.id);
+
   await db.createMessage({
     conversationId: conv.id,
     role: "user",
     content: userContent,
     imageData: imageDataUrl,
   });
-
-  const history = await db.listConversationMessages(conv.id);
-  const recentHistory = history.slice(-20);
 
   const systemPrompt = await db.getActiveSystemPrompt(advisor);
   const fullUser = await db.getUserById(user.id);
@@ -68,29 +69,19 @@ export async function runAdvisorChatMutation(
     `- Plan: ${usage.planType}`,
   ].filter(Boolean);
   const userProfileCtx = userProfileLines.join("\n");
-  const olderHistory = history.slice(0, Math.max(0, history.length - 21));
-  const memoryNote =
-    olderHistory.length > 0
-      ? `\n\n[Conversation Memory: ${history.length} total messages. Earlier: ${olderHistory
-          .slice(-5)
-          .map((m: { role: string; content: string }) => `${m.role === "user" ? "User" : "AI"}: ${m.content.slice(0, 120)}`)
-          .join(" | ")}]`
-      : "";
 
-  const baseSystem =
-    (systemPrompt || FALLBACK_PROMPTS[advisor]) + userProfileCtx + memoryNote;
+  const baseSystem = (systemPrompt || FALLBACK_PROMPTS[advisor]) + userProfileCtx;
   const safeSystem = appendAdvisorSafetyPrompt(baseSystem, advisor);
 
+  // Strict JSON array of message objects: system + lean recent history + current turn.
+  const recentHistory = priorHistory.slice(-(db.WEB_CHAT_CONTEXT_WINDOW - 1));
   const llmMessages: LlmMessage[] = [
     { role: "system", content: safeSystem },
-    ...recentHistory.slice(0, -1).map((m: { role: string; content: string; imageData?: string | null }) => {
-      const row = m as { imageData?: string | null };
-      return {
-        role: m.role as "user" | "assistant",
-        content: m.content,
-        imageBase64: row.imageData ?? undefined,
-      };
-    }),
+    ...recentHistory.map((m) => ({
+      role: m.role,
+      content: m.content,
+      imageBase64: m.imageData ?? undefined,
+    })),
     {
       role: "user",
       content: userContent,
@@ -107,8 +98,13 @@ export async function runAdvisorChatMutation(
   }
 
   await db.createMessage({ conversationId: conv.id, role: "assistant", content: assistantMessage });
+  // Keep the structured JSON snapshot in sync with both new turns.
+  await db.appendConversationHistoryJson(conv.id, [
+    { role: "user", content: userContent, imageData: imageDataUrl ?? null },
+    { role: "assistant", content: assistantMessage, imageData: null },
+  ]);
   await db.touchConversation(conv.id);
-  if (history.length <= 1) {
+  if (priorHistory.length === 0) {
     await db.updateConversationTitle(conv.id, (text || "Image message").slice(0, 80));
   }
   await db.incrementMessageUsed(user.id, advisor);
